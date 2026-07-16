@@ -81,6 +81,28 @@ Switching providers does not bypass the Skill: acquisition, outline, golden-styl
 
 The CLI safely loads only its allowlisted variables from `~/.hermes/.env` when present, so an Agent must never inspect or print that file. Set `VTM_ENV_FILE` to use a different protected environment file.
 
+## Interactive configuration center
+
+Use the deterministic menu to inspect core and platform readiness without exposing values:
+
+```bash
+scripts/vtm configure
+scripts/vtm configure status
+scripts/vtm configure platform 1
+```
+
+The menu currently numbers Bilibili as 1, YouTube as 2, Zhihu as 3, generic web/CSDN as 4, Douyin as 5, and Xiaohongshu as 6. `adapter_installed` is authoritative: a listed roadmap platform is not usable until its adapter is implemented and tested.
+
+Never paste a Cookie, API Key, Secret, or Token into Hermes or another chat. From an SSH terminal, use hidden interactive input instead:
+
+```bash
+scripts/vtm configure secret bilibili_cookie
+```
+
+The dedicated store defaults to `~/.config/video-to-detailed-manuscript/secrets.env`; its directory is `0700`, the file and lock are `0600`, and writes are atomic. It contains only allowlisted project variables. The loader reads this project file first and fills still-missing allowlisted values from the legacy `~/.hermes/.env`; it never loads unrelated environment entries. Status output contains booleans and labels only.
+
+Public acquisition is preferred. Bilibili public videos need no credential; its complete Cookie header is optional. YouTube's API Key is an optional future metadata/API enhancement, not a universal subtitle credential. Public Zhihu pages are planned without a key, while its official Access Secret enables only the APIs actually granted. Douyin official client credentials apply only to reviewed applications and authorized scopes. The currently documented Xiaohongshu merchant/mini-app credentials are not treated as a general public-note reading API.
+
 ## Server baseline
 
 Use a mainland China ECS in Shanghai or Hangzhou. Start with 4 vCPU, 8 GB RAM, 40–80 GB SSD, Ubuntu 24.04, no GPU, and one CPU-ASR job; test two only after observing memory. Use Feishu WebSocket mode so the service does not need a public web endpoint.

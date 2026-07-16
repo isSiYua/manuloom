@@ -67,6 +67,31 @@ Return immediately after `submit` returns `"status": "submitted"`. Before the fi
 
 Persist every job's state and last stage in the task registry. For `任务状态`, `处理到哪了`, `有没有卡住`, or equivalent, run `tasks` and report every `queued` or `running` task with its stable ID, stage number, and stage message. `queued` is a normal intermediate state, not a failure. Do not answer with Hermes' generic Agent status when the user is asking about video-note jobs.
 
+## Configure core services and source platforms
+
+For `配置`, `配置平台`, `平台配置`, or `检查配置`, run:
+
+```bash
+<skill-root>/scripts/vtm configure
+<skill-root>/scripts/vtm configure status
+```
+
+Relay the deterministic menu and boolean configuration state. The platform menu uses stable numbers, but the bare-number safety rule remains unchanged: a reply such as `1` is never an instruction. Require `配置 1`, `配置 B站`, or another explicit configuration verb, then run:
+
+```bash
+<skill-root>/scripts/vtm configure platform 1
+```
+
+Public, no-login acquisition is preferred. Explain each adapter's actual public mode, optional credential, official setup URL, and access limitations without promising that an API credential can read arbitrary content. An adapter marked uninstalled is a roadmap item, not a working capability.
+
+Never ask the user to paste a Cookie, `SESSDATA`, API Key, client secret, access secret, OAuth token, or refresh token into Hermes, Feishu/Lark, another chat, a shell command argument, or a pipe. Chat delivery is not a secure secret channel. Direct the user to SSH into the server and run the exact interactive command returned by `configure platform`, for example:
+
+```bash
+<skill-root>/scripts/vtm configure secret bilibili_cookie
+```
+
+The CLI requires a TTY, hides input, writes only an allowlisted value to the project-specific `0600` secret file, and never returns the value. For `移除 <配置项>` first explain the affected capability and ask for confirmation; only after explicit confirmation run `configure remove <配置项> --confirm`. Configuration status and tests may report only presence, validity, expiry, or insufficient permission. They must never print a secret value, prefix, request header, provider response body, or the contents of an environment file.
+
 ## Extract a video
 
 1. Run `doctor` only when deployment readiness is unknown. Never install packages or download models inside a user video job.

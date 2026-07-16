@@ -17,6 +17,13 @@ from unittest.mock import patch
 from vtm_core import PIPELINE_VERSION
 from vtm_core.asr import FUNASR_BATCH_SECONDS, faster_whisper_model_path, normalize_segments, parse_srt
 from vtm_core.bilibili import BilibiliClient
+from vtm_core.configuration import (
+    configuration_menu,
+    platform_configuration,
+    remove_secret,
+    secret_store_path,
+    set_secret,
+)
 from vtm_core.llm import OpenAICompatibleClient
 from vtm_core.direct_manuscript import (
     DIRECT_DETAIL_PROMPT,
@@ -36,6 +43,7 @@ from vtm_core.direct_manuscript import (
     visual_requests_from_plan,
 )
 from vtm_core.models import Frame, InformationUnit, OutlineSection, Paragraph, Segment
+from vtm_core.sources import BilibiliSourceAdapter, SourceAdapter, adapter_for
 from vtm_core.manuscript import (
     _adjudicate_final_audit,
     _anchor_supported as manuscript_anchor_supported,
@@ -342,6 +350,12 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(payload["visuals"]["nearby_duplicate_aligned_frames_removed"])
         self.assertEqual(payload["tasks"]["downloadable_statuses"], ["complete"])
         self.assertFalse(payload["secrets"]["secret_values_printed_or_searched"])
+        self.assertTrue(payload["acquisition"]["source_adapter_registry"])
+        self.assertFalse(payload["acquisition"]["future_sources_fork_manuscript_core"])
+        self.assertFalse(payload["secrets"]["chat_secret_delivery_allowed"])
+        self.assertEqual(payload["secrets"]["dedicated_secret_file_permissions"], "0600")
+        self.assertTrue(payload["configuration"]["deterministic_platform_menu"])
+        self.assertFalse(payload["configuration"]["bare_number_configures_platform"])
 
     def test_direct_manuscript_uses_whole_document_writer_and_reviewer(self):
         segments = [
@@ -1993,6 +2007,93 @@ class CoreTests(unittest.TestCase):
                 self.assertNotIn("UNRELATED_SECRET", os.environ)
                 self.assertEqual(default_vault(), Path("/tmp/example-vault"))
                 self.assertEqual(os.environ["VTM_FINAL_VISUAL_HEIGHT"], "1080")
+
+    def test_source_adapter_registry_wraps_frozen_bilibili_identity(self):
+        adapter = adapter_for("BV1ab411c7DE")
+        self.assertIsInstance(adapter, SourceAdapter)
+        self.assertIsInstance(adapter, BilibiliSourceAdapter)
+        info = VideoInfo(
+            url="https://www.bilibili.com/video/BV1ab411c7DE/?p=2",
+            bvid="BV1ab411c7DE",
+            cid=99,
+            part=2,
+            title="主标题",
+            part_title="第二部分",
+            duration=120.0,
+            owner="作者",
+            cover="",
+        )
+        reference = adapter.reference(info)
+        self.assertEqual(reference.source_key, "bilibili:BV1ab411c7DE:p2")
+        self.assertEqual(reference.title, "主标题 - 第二部分")
+        self.assertEqual(reference.author, "作者")
+        with self.assertRaises(ValueError):
+            adapter_for("https://example.com/article")
+
+    def test_configuration_menu_is_deterministic_and_never_returns_secret_values(self):
+        env = {
+            "VTM_LLM_API_KEY": "text-secret",
+            "BILIBILI_COOKIE": "SESSDATA=private",
+        }
+        menu = configuration_menu(env)
+        self.assertTrue(menu["core"]["text_llm_key"])
+        self.assertEqual(menu["secret_delivery"], "never_send_in_chat")
+        encoded = json.dumps(menu, ensure_ascii=False)
+        self.assertNotIn("text-secret", encoded)
+        self.assertNotIn("SESSDATA=private", encoded)
+        bilibili = menu["platforms"][0]
+        self.assertEqual(bilibili["number"], 1)
+        self.assertTrue(bilibili["adapter_installed"])
+        self.assertTrue(bilibili["credentials"]["bilibili_cookie"])
+        self.assertEqual(platform_configuration("3", {})["platform"], "zhihu")
+        self.assertEqual(platform_configuration("B站", {})["platform"], "bilibili")
+
+    def test_dedicated_secret_store_is_private_allowlisted_and_removable(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "config" / "secrets.env"
+            result = set_secret("bilibili_cookie", "SESSDATA=private", path=path)
+            self.assertTrue(result["configured"])
+            self.assertFalse(result["value_printed"])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            stored = path.read_text(encoding="utf-8")
+            self.assertIn("BILIBILI_COOKIE=SESSDATA=private", stored)
+            self.assertNotIn("UNRELATED_SECRET", stored)
+            removed = remove_secret("bilibili_cookie", path=path)
+            self.assertTrue(removed["removed"])
+            self.assertNotIn("BILIBILI_COOKIE=", path.read_text(encoding="utf-8"))
+            with self.assertRaises(KeyError):
+                set_secret("unapproved_secret", "value", path=path)
+
+    def test_runtime_env_loads_dedicated_store_then_legacy_hermes_env(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            dedicated = secret_store_path(home)
+            dedicated.parent.mkdir(parents=True)
+            dedicated.write_text("BILIBILI_COOKIE=dedicated-cookie\n", encoding="utf-8")
+            hermes = home / ".hermes" / ".env"
+            hermes.parent.mkdir(parents=True)
+            hermes.write_text(
+                "BILIBILI_COOKIE=legacy-cookie\nDEEPSEEK_API_KEY=model-key\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "video_manuscript.Path.home", return_value=home
+            ):
+                load_runtime_env()
+                self.assertEqual(os.environ["BILIBILI_COOKIE"], "dedicated-cookie")
+                self.assertEqual(os.environ["DEEPSEEK_API_KEY"], "model-key")
+
+    def test_configure_secret_refuses_chat_or_pipe_input(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}, clear=True
+        ), patch("video_manuscript.install_cancel_handlers"), patch.object(
+            sys, "argv", ["video_manuscript.py", "configure", "secret", "bilibili_cookie"]
+        ), patch.object(sys.stdin, "isatty", return_value=False), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            self.assertEqual(main(), 1)
+            self.assertFalse(secret_store_path(Path(temp)).exists())
 
     def test_duplicate_skill_installations_are_detected(self):
         with tempfile.TemporaryDirectory() as temp:

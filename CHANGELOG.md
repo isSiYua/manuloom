@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — multi-source foundation
+
+- Adds the source-adapter discovery protocol and wraps the frozen Bilibili client without changing `pipeline_version: 1.0.0`.
+- Adds a deterministic core/platform configuration menu with explicit installed-versus-planned capability status.
+- Adds hidden TTY-only secret entry, an allowlisted project-specific `0600` secret store, and value-free configuration status.
+- Keeps bare numeric replies non-operative and prohibits Cookie, API Key, Secret, or Token delivery through Agent chats.
+
 ## 1.1.0 — deployment packaging
 
 - Adds a dry-run-capable Debian/Ubuntu installer for Hermes, Codex, and explicit Agent Skill directories.

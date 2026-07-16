@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .asr import normalize_segments, transcribe
 from . import PIPELINE_VERSION
 from .bilibili import BilibiliClient, VideoInfo
+from .sources import BilibiliSourceAdapter
 from .llm import text_client
 from .media import download_media
 from .direct_manuscript import (
@@ -79,7 +80,11 @@ def _resume_checkpoint(resume_dir: Path | None, destination: Path) -> None:
 
 
 def run(options: Options) -> dict[str, Any]:
-    client = BilibiliClient()
+    # Keep the accepted Bilibili client behavior frozen behind the first
+    # source-adapter boundary. Future sources are selected before entering the
+    # shared manuscript core instead of forking this core per website.
+    adapter = BilibiliSourceAdapter(BilibiliClient())
+    client = adapter.client
     state = state_root()
     vault_root = options.vault.expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)

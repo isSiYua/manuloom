@@ -25,6 +25,16 @@ if str(SCRIPT_DIR) not in sys.path:
 from vtm_core.asr import faster_whisper_model_path, funasr_ready, prepare_funasr  # noqa: E402
 from vtm_core import PIPELINE_VERSION  # noqa: E402
 from vtm_core.bilibili import BilibiliClient  # noqa: E402
+from vtm_core.configuration import (  # noqa: E402
+    SECRET_ENV_KEYS,
+    configuration_menu,
+    platform_configuration,
+    remove_secret,
+    secret_specs_public,
+    secret_store_path,
+    set_secret_interactive,
+)
+from vtm_core.sources import BilibiliSourceAdapter  # noqa: E402
 from vtm_core.pipeline import Options, run  # noqa: E402
 from vtm_core.output import remove_index_entries, update_indexes  # noqa: E402
 from vtm_core.direct_manuscript import create_direct_manuscript  # noqa: E402
@@ -52,7 +62,7 @@ _RUNTIME_ENV_KEYS = {
     "VTM_MAX_VISION_FRAMES", "VTM_ASR_BACKEND", "VTM_ASR_MODEL", "VTM_VISUAL_HEIGHT",
     "VTM_FINAL_VISUAL_HEIGHT", "VTM_PROGRESS_TARGET",
     "VTM_MAX_CONCURRENT_JOBS",
-}
+} | set(SECRET_ENV_KEYS)
 
 
 def _raise_cancelled(_signum: int, _frame: object) -> None:
@@ -67,7 +77,11 @@ def install_cancel_handlers() -> None:
 
 def load_runtime_env() -> None:
     configured = os.getenv("VTM_ENV_FILE")
-    candidates = [Path(configured).expanduser()] if configured else [Path.home() / ".hermes" / ".env"]
+    candidates = (
+        [Path(configured).expanduser()]
+        if configured
+        else [secret_store_path(), Path.home() / ".hermes" / ".env"]
+    )
     for path in candidates:
         if not path.is_file():
             continue
@@ -82,7 +96,6 @@ def load_runtime_env() -> None:
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
             os.environ[key] = value
-        break
 
 
 def default_vault() -> Path:
@@ -786,6 +799,22 @@ def parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--part", type=int)
     commands.add_parser("doctor")
     commands.add_parser("contract", help="print the deterministic manuscript and task protocol")
+    configure_parser = commands.add_parser(
+        "configure",
+        help="show configuration guidance or securely manage one allowlisted secret",
+    )
+    configure_parser.add_argument(
+        "action",
+        nargs="?",
+        default="menu",
+        choices=("menu", "status", "platform", "secret", "remove"),
+    )
+    configure_parser.add_argument("target", nargs="?")
+    configure_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="required when removing a configured secret",
+    )
     evaluate_parser = commands.add_parser(
         "evaluate", help="evaluate text editing from existing audit artifacts without creating a task"
     )
@@ -951,6 +980,9 @@ def contract() -> dict[str, object]:
             "checkpoint_reusable": True,
         },
         "acquisition": {
+            "source_adapter_registry": True,
+            "bilibili_core_wrapped_without_pipeline_change": True,
+            "future_sources_fork_manuscript_core": False,
             "order": [
                 "native_or_ai_subtitle",
                 "authenticated_ai_conclusion",
@@ -1045,6 +1077,17 @@ def contract() -> dict[str, object]:
             "runtime_env_allowlisted": True,
             "secret_values_printed_or_searched": False,
             "bilibili_cookie_forwarded_to_subtitle_or_media_cdn": False,
+            "chat_secret_delivery_allowed": False,
+            "interactive_tty_secret_entry": True,
+            "dedicated_secret_file_permissions": "0600",
+            "configuration_status_contains_secret_values": False,
+        },
+        "configuration": {
+            "deterministic_platform_menu": True,
+            "bare_number_configures_platform": False,
+            "platform_reply_requires_configure_verb": True,
+            "public_mode_preferred": True,
+            "adapter_reports_access_limitations": True,
         },
     }
 
@@ -1064,6 +1107,29 @@ def main() -> int:
             result = doctor()
         elif args.command == "contract":
             result = contract()
+        elif args.command == "configure":
+            if args.action in {"menu", "status"}:
+                result = configuration_menu()
+                if args.action == "status":
+                    result["secrets"] = secret_specs_public()
+            elif args.action == "platform":
+                if not args.target:
+                    raise ValueError("configure platform requires a platform number or name")
+                result = platform_configuration(args.target)
+            elif args.action == "secret":
+                if not args.target:
+                    raise ValueError("configure secret requires a configuration item")
+                if not sys.stdin.isatty():
+                    raise RuntimeError(
+                        "秘密配置必须在 SSH 交互终端中录入；不要通过聊天、命令参数或管道传递"
+                    )
+                result = set_secret_interactive(args.target)
+            else:
+                if not args.target:
+                    raise ValueError("configure remove requires a configuration item")
+                if not args.confirm:
+                    raise ValueError("移除秘密配置需要显式提供 --confirm")
+                result = remove_secret(args.target)
         elif args.command == "evaluate":
             result = evaluate_text_core(
                 args.source_dir,

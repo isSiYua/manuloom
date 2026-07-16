@@ -65,6 +65,9 @@ Codex 使用 `--agent codex`；其他 Agent 使用 `--skill-dir` 指定其 Skill
 ```bash
 scripts/vtm doctor
 scripts/vtm contract
+scripts/vtm configure
+scripts/vtm configure platform 1
+scripts/vtm configure status
 scripts/vtm tasks
 scripts/vtm tasks --all
 scripts/vtm bundle --task 1 --send-target feishu
@@ -75,6 +78,8 @@ scripts/vtm cleanup
 ```
 
 Agent 自然语言映射和进度规则见 [SKILL.md](SKILL.md)。
+
+`configure` 会显示核心服务与来源平台的确定性配置清单。公开内容优先使用无凭据模式；Cookie、API Key、Secret 和 Token 不得发送到 Agent 聊天，只能通过 SSH 交互终端运行 `scripts/vtm configure secret <配置项>` 隐藏录入。秘密保存在项目专用的 `0600` 文件中，状态命令只返回是否已配置，不返回值或前缀。
 
 ## 安全与平台规则
 
