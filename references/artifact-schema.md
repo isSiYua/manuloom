@@ -13,6 +13,8 @@ User-facing Vault content:
 └── Daily/YYYY-MM-DD.md
 ```
 
+YouTube videos use the same layout with a `[YT-video_id]` folder marker. Source-neutral task metadata records `platform`, `source_kind`, `source_id`, and `source_key`; legacy `bvid` and `part` remain for Bilibili compatibility.
+
 Operational content outside the Vault:
 
 ```text

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,10 +8,14 @@ from typing import Any, Callable
 
 from .asr import normalize_segments, transcribe
 from . import PIPELINE_VERSION
-from .bilibili import BilibiliClient, VideoInfo
-from .sources import BilibiliSourceAdapter
+from .bilibili import BilibiliClient
+from .sources import (
+    BilibiliSourceAdapter,
+    VideoSourceAdapter,
+    adapter_by_platform,
+    adapter_for,
+)
 from .llm import text_client
-from .media import download_media
 from .direct_manuscript import (
     complete_direct_manuscript,
     create_direct_plan,
@@ -31,7 +34,7 @@ from .output import (
 from .tasks import state_root
 from .transcript import enrich_with_visual_evidence
 from .utils import atomic_json, load_json, safe_name
-from .visual import extract_useful_frames, recapture_retained_frames
+from .visual import extract_useful_frames
 
 
 @dataclass(slots=True)
@@ -60,13 +63,6 @@ def _progress(options: Options, message: str) -> None:
         options.progress(message)
 
 
-def _part_url(url: str, part: int) -> str:
-    parsed = urllib.parse.urlparse(url)
-    query = urllib.parse.parse_qs(parsed.query)
-    query["p"] = [str(part)]
-    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-
 def _segments_from_artifact(payload: dict[str, Any]) -> list[Segment]:
     return [Segment(**item) for item in payload.get("segments") or []]
 
@@ -80,11 +76,6 @@ def _resume_checkpoint(resume_dir: Path | None, destination: Path) -> None:
 
 
 def run(options: Options) -> dict[str, Any]:
-    # Keep the accepted Bilibili client behavior frozen behind the first
-    # source-adapter boundary. Future sources are selected before entering the
-    # shared manuscript core instead of forking this core per website.
-    adapter = BilibiliSourceAdapter(BilibiliClient())
-    client = adapter.client
     state = state_root()
     vault_root = options.vault.expanduser().resolve()
     vault_root.mkdir(parents=True, exist_ok=True)
@@ -103,16 +94,31 @@ def run(options: Options) -> dict[str, Any]:
             metadata = load_json(options.resume.resolve() / "metadata.json")
             if not metadata:
                 raise RuntimeError("续跑目录缺少 metadata.json")
-            info = VideoInfo(**{key: metadata[key] for key in VideoInfo.__dataclass_fields__})
+            platform = str(metadata.get("platform") or "bilibili")
+            adapter = adapter_by_platform(platform)
+            if platform == "bilibili":
+                adapter = BilibiliSourceAdapter(BilibiliClient())
+            if not isinstance(adapter, VideoSourceAdapter):
+                raise RuntimeError(f"{platform} 不是视频来源适配器")
+            info = adapter.restore_info(metadata)
         else:
-            info = client.inspect(options.url, options.part)
-        full_title = info.title if not info.part_title or info.part_title == info.title else f"{info.title} - {info.part_title}"
-        folder = safe_name(f"{options.task_key}-{full_title} [{info.bvid}-p{info.part}]")
+            detected = adapter_for(options.url)
+            adapter = (
+                BilibiliSourceAdapter(BilibiliClient())
+                if detected.platform == "bilibili"
+                else detected
+            )
+            if not isinstance(adapter, VideoSourceAdapter):
+                raise RuntimeError(f"{adapter.platform} 不是视频来源适配器")
+            info = adapter.inspect(options.url, options.part)
+        reference = adapter.reference(info)
+        full_title = reference.title
+        folder = safe_name(f"{options.task_key}-{full_title} [{adapter.folder_marker(info)}]")
         year, month = options.task_date[:4], options.task_date[:7]
         job_dir = vault_root / "Sources" / "Videos" / year / month / folder
         assets_dir = job_dir / "assets"
         assets_dir.mkdir(parents=True, exist_ok=True)
-        metadata = info.to_dict()
+        metadata = adapter.metadata(info)
         metadata.update(
             title=full_title,
             processed_at=datetime.now(timezone.utc).isoformat(),
@@ -134,16 +140,15 @@ def run(options: Options) -> dict[str, Any]:
             segments = _segments_from_artifact(raw)
             transcript_meta = raw.get("metadata") or {"source": "resumed"}
         else:
-            segments, transcript_meta = client.subtitles(info)
+            segments, transcript_meta = adapter.primary_transcript(info)
             if not segments:
-                segments, transcript_meta = client.ai_transcript(info)
+                segments, transcript_meta = adapter.secondary_transcript(info)
             if not segments:
-                audio_path = download_media(
-                    _part_url(info.url, info.part), work_dir, audio_only=True,
-                    cookies_file=options.cookies_file, client=client, info=info,
+                audio_path = adapter.download_audio(
+                    info, work_dir, cookies_file=options.cookies_file
                 )
                 segments, transcript_meta = transcribe(audio_path, options.asr_model, backend=options.asr_backend)
-            segments = normalize_segments(segments, info.duration)
+            segments = normalize_segments(segments, reference.duration or 0)
             atomic_json(raw_path, {"metadata": transcript_meta, "segments": [segment.to_dict() for segment in segments]})
 
         _progress(options, "正在清理和重排完整文字稿。")
@@ -154,7 +159,7 @@ def run(options: Options) -> dict[str, Any]:
         plan = create_direct_plan(
             segments,
             llm,
-            context=f"标题：{full_title}；UP 主：{info.owner}",
+            context=adapter.context(info),
             checkpoint_path=checkpoint_path,
         )
 
@@ -171,9 +176,10 @@ def run(options: Options) -> dict[str, Any]:
                 dedicated_requests = []
                 visual_plan_warning = f"独立视觉范围规划失败，使用文章大纲请求（{type(exc).__name__}）"
             visual_requests = merge_visual_requests(outline_requests, dedicated_requests)
-            video_path = download_media(
-                _part_url(info.url, info.part), work_dir, audio_only=False,
-                cookies_file=options.cookies_file, client=client, info=info,
+            video_path = adapter.download_analysis_video(
+                info,
+                work_dir,
+                cookies_file=options.cookies_file,
                 max_height=options.visual_height,
             )
             frames, extracted_visual_meta = extract_useful_frames(
@@ -194,7 +200,7 @@ def run(options: Options) -> dict[str, Any]:
             segments,
             llm,
             plan,
-            context=f"标题：{full_title}；UP 主：{info.owner}",
+            context=adapter.context(info),
             frames=frames,
             checkpoint_path=checkpoint_path,
         )
@@ -205,8 +211,7 @@ def run(options: Options) -> dict[str, Any]:
             visual_warnings = enrich_with_visual_evidence(paragraphs, frames, llm)
             try:
                 planned = plan_frame_evidence_groups(paragraphs, frames)
-                visual_meta["final_frame_upgrade"] = recapture_retained_frames(
-                    client,
+                visual_meta["final_frame_upgrade"] = adapter.recapture_frames(
                     info,
                     [
                         frame
@@ -258,8 +263,15 @@ def run(options: Options) -> dict[str, Any]:
             "status": status, "stage": "complete", "note": str(note_path), "job_dir": str(job_dir),
             "source_dir": str(source_dir), "transcript_source": transcript_meta.get("source"),
             "semantic_editing": coverage.get("semantic_editing", False), "frames": kept_frame_count,
-            "warnings": coverage.get("warnings", []), "bvid": info.bvid, "part": info.part,
-            "title": full_title, "url": info.url,
+            "warnings": coverage.get("warnings", []),
+            "platform": reference.platform,
+            "source_kind": reference.source_kind,
+            "source_id": reference.source_id,
+            "source_key": reference.source_key,
+            "bvid": reference.source_id if reference.platform == "bilibili" else "",
+            "part": reference.part,
+            "title": full_title,
+            "url": reference.canonical_url,
         }
         atomic_json(job_path, result)
         _progress(options, "处理完成。")

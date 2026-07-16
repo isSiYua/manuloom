@@ -6,6 +6,9 @@
 - Adds a deterministic core/platform configuration menu with explicit installed-versus-planned capability status.
 - Adds hidden TTY-only secret entry, an allowlisted project-specific `0600` secret store, and value-free configuration status.
 - Keeps bare numeric replies non-operative and prohibits Cookie, API Key, Secret, or Token delivery through Agent chats.
+- Adds public YouTube video support with canonical URL identity, manual/original-language subtitle priority, audio-ASR fallback, dynamic visuals, and retained-frame high-resolution seeking.
+- Generalizes task identity to `platform/source_kind/source_id/source_key` while preserving legacy BVID fields and Bilibili duplicate behavior.
+- Adds bounded source-network timeouts and an optional protected outbound proxy setting for restricted server networks.
 
 ## 1.1.0 — deployment packaging
 

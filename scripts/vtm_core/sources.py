@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .bilibili import ALLOWED_HOSTS, BilibiliClient, VideoInfo
+from .models import Frame, Segment
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,9 +57,47 @@ class SourceAdapter(Protocol):
 
     def normalize_input_url(self, value: str) -> str: ...
 
+    def canonicalize_input(self, value: str) -> str: ...
+
+    def source_id_from_url(self, value: str) -> str: ...
+
+    def selector_from_url(self, value: str, explicit: int | None = None) -> int | None: ...
+
     def inspect(self, value: str, selector: int | None = None) -> Any: ...
 
     def reference(self, inspected: Any) -> SourceReference: ...
+
+
+@runtime_checkable
+class VideoSourceAdapter(SourceAdapter, Protocol):
+    def restore_info(self, metadata: dict[str, Any]) -> Any: ...
+
+    def metadata(self, inspected: Any) -> dict[str, Any]: ...
+
+    def primary_transcript(self, inspected: Any) -> tuple[list[Segment], dict[str, Any]]: ...
+
+    def secondary_transcript(self, inspected: Any) -> tuple[list[Segment], dict[str, Any]]: ...
+
+    def download_audio(
+        self, inspected: Any, work_dir: Path, *, cookies_file: Path | None = None
+    ) -> Path: ...
+
+    def download_analysis_video(
+        self,
+        inspected: Any,
+        work_dir: Path,
+        *,
+        cookies_file: Path | None = None,
+        max_height: int = 720,
+    ) -> Path: ...
+
+    def recapture_frames(
+        self, inspected: Any, frames: list[Frame], *, max_height: int = 1080
+    ) -> dict[str, int | str]: ...
+
+    def context(self, inspected: Any) -> str: ...
+
+    def folder_marker(self, inspected: Any) -> str: ...
 
 
 class BilibiliSourceAdapter:
@@ -77,6 +117,19 @@ class BilibiliSourceAdapter:
 
     def normalize_input_url(self, value: str) -> str:
         return self.client.normalize_input_url(value)
+
+    def canonicalize_input(self, value: str) -> str:
+        normalized = self.normalize_input_url(value)
+        parsed = urllib.parse.urlparse(normalized)
+        if (parsed.hostname or "").lower() in {"b23.tv", "www.b23.tv"}:
+            return self.client.resolve(normalized)
+        return normalized
+
+    def source_id_from_url(self, value: str) -> str:
+        return self.client.extract_bvid(value)
+
+    def selector_from_url(self, value: str, explicit: int | None = None) -> int:
+        return self.client.extract_part(value, explicit)
 
     def inspect(self, value: str, selector: int | None = None) -> VideoInfo:
         return self.client.inspect(value, selector)
@@ -98,11 +151,91 @@ class BilibiliSourceAdapter:
             duration=inspected.duration,
         )
 
+    def restore_info(self, metadata: dict[str, Any]) -> VideoInfo:
+        return VideoInfo(**{key: metadata[key] for key in VideoInfo.__dataclass_fields__})
+
+    def metadata(self, inspected: VideoInfo) -> dict[str, Any]:
+        payload = inspected.to_dict()
+        payload.update(self.reference(inspected).to_dict())
+        payload["owner"] = inspected.owner
+        return payload
+
+    def primary_transcript(self, inspected: VideoInfo) -> tuple[list[Segment], dict[str, Any]]:
+        return self.client.subtitles(inspected)
+
+    def secondary_transcript(self, inspected: VideoInfo) -> tuple[list[Segment], dict[str, Any]]:
+        return self.client.ai_transcript(inspected)
+
+    @staticmethod
+    def _part_url(url: str, part: int) -> str:
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        query["p"] = [str(part)]
+        return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
+
+    def download_audio(
+        self, inspected: VideoInfo, work_dir: Path, *, cookies_file: Path | None = None
+    ) -> Path:
+        from .media import download_media
+
+        return download_media(
+            self._part_url(inspected.url, inspected.part),
+            work_dir,
+            audio_only=True,
+            cookies_file=cookies_file,
+            client=self.client,
+            info=inspected,
+        )
+
+    def download_analysis_video(
+        self,
+        inspected: VideoInfo,
+        work_dir: Path,
+        *,
+        cookies_file: Path | None = None,
+        max_height: int = 720,
+    ) -> Path:
+        from .media import download_media
+
+        return download_media(
+            self._part_url(inspected.url, inspected.part),
+            work_dir,
+            audio_only=False,
+            cookies_file=cookies_file,
+            client=self.client,
+            info=inspected,
+            max_height=max_height,
+        )
+
+    def recapture_frames(
+        self, inspected: VideoInfo, frames: list[Frame], *, max_height: int = 1080
+    ) -> dict[str, int | str]:
+        from .visual import recapture_retained_frames
+
+        return recapture_retained_frames(self.client, inspected, frames, max_height=max_height)
+
+    def context(self, inspected: VideoInfo) -> str:
+        reference = self.reference(inspected)
+        return f"标题：{reference.title}；UP 主：{reference.author}"
+
+    def folder_marker(self, inspected: VideoInfo) -> str:
+        return f"{inspected.bvid}-p{inspected.part}"
+
 
 def source_adapters() -> tuple[SourceAdapter, ...]:
     """Return installed adapters in deterministic matching order."""
 
-    return (BilibiliSourceAdapter(),)
+    from .youtube import YouTubeSourceAdapter
+
+    return (BilibiliSourceAdapter(), YouTubeSourceAdapter())
+
+
+def adapter_by_platform(platform: str) -> SourceAdapter:
+    normalized = str(platform or "").strip().lower()
+    for adapter in source_adapters():
+        if adapter.platform == normalized:
+            return adapter
+    raise KeyError(f"当前尚未安装平台适配器：{platform}")
 
 
 def adapter_for(value: str) -> SourceAdapter:

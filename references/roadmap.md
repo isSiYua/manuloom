@@ -19,7 +19,7 @@ The common pipeline converts those results into chronological text evidence and 
 
 ### YouTube
 
-Highest-priority addition. Use public metadata and creator-provided or automatically generated subtitle tracks first. Acquire one audio stream only when subtitles are unavailable, and obtain video frames only for transcript-requested visual evidence.
+Implemented for public videos. It uses public metadata and creator-provided subtitle tracks first, then original-language automatically generated captions. It acquires one audio stream only when subtitles are unavailable and obtains video frames only for transcript-requested visual evidence. Restricted server networks may require a privately operated outbound source proxy.
 
 ### Generic web pages
 
@@ -41,6 +41,6 @@ A single image-capable provider/model may already serve both text and vision by 
 
 1. Freeze and publish the Bilibili core with reproducible tests and no credentials or private artifacts.
 2. Add the source-adapter protocol without changing Bilibili output.
-3. Implement YouTube and generic web-page adapters with fixture-based regression tests.
+3. Implement YouTube (complete) and generic web-page adapters with fixture-based regression tests.
 4. Add Zhihu public pages.
 5. Evaluate Douyin and Xiaohongshu as optional integrations against platform stability and account safety.

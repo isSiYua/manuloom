@@ -24,7 +24,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from vtm_core.asr import faster_whisper_model_path, funasr_ready, prepare_funasr  # noqa: E402
 from vtm_core import PIPELINE_VERSION  # noqa: E402
-from vtm_core.bilibili import BilibiliClient  # noqa: E402
 from vtm_core.configuration import (  # noqa: E402
     SECRET_ENV_KEYS,
     configuration_menu,
@@ -34,7 +33,7 @@ from vtm_core.configuration import (  # noqa: E402
     secret_store_path,
     set_secret_interactive,
 )
-from vtm_core.sources import BilibiliSourceAdapter  # noqa: E402
+from vtm_core.sources import adapter_for  # noqa: E402
 from vtm_core.pipeline import Options, run  # noqa: E402
 from vtm_core.output import remove_index_entries, update_indexes  # noqa: E402
 from vtm_core.direct_manuscript import create_direct_manuscript  # noqa: E402
@@ -255,6 +254,17 @@ def find_existing_video_task(vault: Path, bvid: str, part: int = 1) -> dict[str,
     return max(matches, key=lambda item: str(item.get("created_at") or ""), default=None)
 
 
+def find_existing_source_task(vault: Path, source_key: str) -> dict[str, object] | None:
+    blocking = {"complete", "needs_review", "queued", "running", "failed", "cancelled"}
+    matches = [
+        item
+        for item in list_tasks(vault, all_tasks=True)
+        if str(item.get("source_key") or "") == source_key
+        and item.get("status") in blocking
+    ]
+    return max(matches, key=lambda item: str(item.get("created_at") or ""), default=None)
+
+
 def _resolve_by_bvid(vault: Path, bvid: str) -> dict[str, object]:
     matches = [item for item in list_tasks(vault, all_tasks=True) if str(item.get("bvid", "")).lower() == bvid.lower()]
     if not matches:
@@ -273,7 +283,10 @@ def sync_task_from_audit(
     """Persist metadata learned after reservation, including failed/cancelled jobs."""
     metadata = load_json(state_root() / "tasks" / task_key / "metadata.json") or {}
     updates: dict[str, object] = {"status": status, "error": error}
-    for key in ("bvid", "part", "url", "title"):
+    for key in (
+        "bvid", "platform", "source_kind", "source_id", "source_key",
+        "part", "url", "title",
+    ):
         value = metadata.get(key)
         if value not in (None, ""):
             updates[key] = value
@@ -760,7 +773,7 @@ def evaluate_text_core(
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Create a complete illustrated manuscript from Bilibili")
+    root = argparse.ArgumentParser(description="Create a complete illustrated manuscript from a supported source")
     commands = root.add_subparsers(dest="command", required=True)
     run_options = argparse.ArgumentParser(add_help=False)
     run_options.add_argument("--url")
@@ -794,7 +807,7 @@ def parser() -> argparse.ArgumentParser:
         parents=[run_options],
         help="detach a video job so the messaging session is released immediately",
     )
-    inspect_parser = commands.add_parser("inspect", help="inspect Bilibili metadata and subtitles")
+    inspect_parser = commands.add_parser("inspect", help="inspect supported-source metadata and text evidence")
     inspect_parser.add_argument("--url", required=True)
     inspect_parser.add_argument("--part", type=int)
     commands.add_parser("doctor")
@@ -881,6 +894,7 @@ def doctor() -> dict[str, object]:
         "text_model": os.getenv("VTM_LLM_MODEL", "deepseek-v4-flash"),
         "vision_configured": all(os.getenv(name) for name in ("VTM_VISION_API_KEY", "VTM_VISION_BASE_URL", "VTM_VISION_MODEL")),
         "vision_model": os.getenv("VTM_VISION_MODEL", ""),
+        "source_proxy_configured": bool(os.getenv("VTM_SOURCE_PROXY")),
         "default_vision_frame_budget": DEFAULT_VISION_FRAME_BUDGET,
         "vision_frame_budget_policy": "transcript_planner_ranges_plus_distinct_scenes",
             "max_adaptive_vision_frame_budget": MAX_ADAPTIVE_VISION_FRAME_BUDGET,
@@ -981,14 +995,22 @@ def contract() -> dict[str, object]:
         },
         "acquisition": {
             "source_adapter_registry": True,
-            "bilibili_core_wrapped_without_pipeline_change": True,
+            "bilibili_behavior_preserved_behind_adapter": True,
             "future_sources_fork_manuscript_core": False,
+            "installed_video_platforms": ["bilibili", "youtube"],
+            "youtube_public_mode_requires_api_key": False,
+            "youtube_manual_subtitle_precedes_automatic": True,
+            "youtube_automatic_caption_prefers_original_language": True,
+            "youtube_missing_subtitle_uses_one_audio_stream_asr": True,
+            "source_network_requests_have_bounded_timeouts": True,
+            "optional_source_proxy_is_allowlisted_secret": True,
             "order": [
                 "native_or_ai_subtitle",
                 "authenticated_ai_conclusion",
                 "one_audio_stream_plus_prepared_local_asr",
             ],
-            "yt_dlp_is_fallback": True,
+            "bilibili_yt_dlp_is_fallback": True,
+            "youtube_yt_dlp_is_public_adapter_backend": True,
             "models_downloaded_during_user_job": False,
         },
         "visuals": {
@@ -1061,6 +1083,10 @@ def contract() -> dict[str, object]:
             "bulk_delete_confirmation_token_minutes": 15,
             "active_video_jobs_protected_from_bulk_delete": True,
             "bulk_delete_emits_start_progress_completion": True,
+            "cross_platform_identity_fields": [
+                "platform", "source_kind", "source_id", "source_key"
+            ],
+            "legacy_bvid_identity_preserved": True,
         },
         "storage": {
             "temporary_media_removed_on_success_failure_cancel": True,
@@ -1172,10 +1198,15 @@ def main() -> int:
         elif args.command == "cleanup":
             result = {"status": "complete", "removed": cleanup_storage()}
         elif args.command == "inspect":
-            client = BilibiliClient()
-            info = client.inspect(args.url, args.part)
-            segments, transcript_meta = client.subtitles(info)
-            result = {"metadata": info.to_dict(), "native_subtitle_segments": len(segments), "transcript": transcript_meta}
+            adapter = adapter_for(args.url)
+            canonical = adapter.canonicalize_input(args.url)
+            info = adapter.inspect(canonical, args.part)
+            segments, transcript_meta = adapter.primary_transcript(info)
+            result = {
+                "metadata": adapter.metadata(info),
+                "source_segments": len(segments),
+                "transcript": transcript_meta,
+            }
         else:
             duplicates = duplicate_skill_paths()
             if len(duplicates) > 1:
@@ -1197,21 +1228,25 @@ def main() -> int:
                 )
             active_vault = args.vault
             hinted_bvid = None
+            hinted_source_id = None
+            source_key = None
+            platform = "bilibili"
+            source_kind = "video"
             requested_part = args.part or 1
             if args.url:
-                args.url = BilibiliClient.normalize_input_url(args.url)
-                if "b23.tv" in args.url.lower():
-                    args.url = BilibiliClient().resolve(args.url)
-                requested_part = BilibiliClient.extract_part(args.url, args.part)
-                try:
-                    hinted_bvid = BilibiliClient.extract_bvid(args.url)
-                except ValueError:
-                    inspected = BilibiliClient().inspect(args.url, args.part)
-                    hinted_bvid = inspected.bvid
-                    requested_part = inspected.part
-                    args.url = inspected.url
-            if hinted_bvid and not args.force:
-                found = find_existing_video_task(args.vault, hinted_bvid, requested_part)
+                adapter = adapter_for(args.url)
+                args.url = adapter.canonicalize_input(args.url)
+                platform = adapter.platform
+                source_kind = adapter.source_kind
+                hinted_source_id = adapter.source_id_from_url(args.url)
+                selector = adapter.selector_from_url(args.url, args.part)
+                requested_part = int(selector or 1)
+                hinted_bvid = hinted_source_id if platform == "bilibili" else None
+                source_key = f"{platform}:{hinted_source_id}"
+                if selector is not None:
+                    source_key += f":p{selector}"
+            if source_key and not args.force:
+                found = find_existing_source_task(args.vault, source_key)
                 if found:
                     failure = f" 上次失败原因：{found.get('error')}" if found.get("status") == "failed" else ""
                     raise RuntimeError(
@@ -1223,6 +1258,10 @@ def main() -> int:
                 url=args.url or "",
                 bvid=hinted_bvid,
                 part=requested_part,
+                platform=platform,
+                source_kind=source_kind,
+                source_id=hinted_source_id,
+                source_key=source_key,
                 status="queued",
             )
             active_key = str(task["task_key"])
@@ -1256,7 +1295,9 @@ def main() -> int:
 
             with video_job_slot(args.vault, active_key, gateway_reporter):
                 result = run(Options(
-                    url=args.url or "", vault=args.vault, part=args.part, cookies_file=args.cookies_file,
+                    url=args.url or "", vault=args.vault,
+                    part=requested_part if platform == "bilibili" else None,
+                    cookies_file=args.cookies_file,
                     no_visual=args.no_visual or args.max_frames == 0, max_frames=args.max_frames,
                     keep_video=args.keep_video, llm_model=args.llm_model, asr_model=args.asr_model,
                     asr_backend=args.asr_backend, visual_height=args.visual_height,
@@ -1268,6 +1309,10 @@ def main() -> int:
             update_task(
                 args.vault, active_key,
                 bvid=result.get("bvid") or hinted_bvid,
+                platform=result.get("platform") or platform,
+                source_kind=result.get("source_kind") or source_kind,
+                source_id=result.get("source_id") or hinted_source_id,
+                source_key=result.get("source_key") or source_key,
                 part=result.get("part") or args.part or 1,
                 url=result.get("url") or args.url or "",
                 title=result.get("title") or Path(str(result["note"])).stem,

@@ -107,26 +107,47 @@ def compose_markdown(
     frames: list[Frame],
 ) -> None:
     note_path.parent.mkdir(parents=True, exist_ok=True)
+    platform = str(metadata.get("platform") or ("bilibili" if metadata.get("bvid") else "unknown"))
+    source_id = str(metadata.get("source_id") or metadata.get("bvid") or "")
+    creator = str(metadata.get("author") or metadata.get("owner") or "")
     lines = [
         "---",
         f"title: {yaml_scalar(metadata.get('title'))}",
         f"source: {yaml_scalar(metadata.get('url'))}",
-        f"bvid: {yaml_scalar(metadata.get('bvid'))}",
-        f"part: {metadata.get('part', 1)}",
-        f"creator: {yaml_scalar(metadata.get('owner'))}",
+    ]
+    if platform == "bilibili":
+        lines.extend(
+            [
+                f"bvid: {yaml_scalar(metadata.get('bvid'))}",
+                f"part: {metadata.get('part', 1)}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"platform: {yaml_scalar(platform)}",
+                f"source_id: {yaml_scalar(source_id)}",
+            ]
+        )
+    lines.extend([
+        f"creator: {yaml_scalar(creator)}",
         f"task: {yaml_scalar(metadata.get('task_key'))}",
         f"created: {yaml_scalar(metadata.get('task_date'))}",
         f"status: {yaml_scalar(metadata.get('quality_status', 'complete'))}",
         f"pipeline_version: {yaml_scalar(metadata.get('pipeline_version', 'unknown'))}",
         'type: "video-manuscript"',
-        'tags: [video-manuscript, bilibili]',
+        f"tags: [video-manuscript, {platform}]",
         "---",
         "",
-        f"# {metadata.get('title') or metadata.get('bvid')}",
+        f"# {metadata.get('title') or source_id}",
         "",
-        f"> 来源：[Bilibili]({metadata.get('url')}) · UP主：{metadata.get('owner') or '未知'}",
+        (
+            f"> 来源：[Bilibili]({metadata.get('url')}) · UP主：{creator or '未知'}"
+            if platform == "bilibili"
+            else f"> 来源：[{platform}]({metadata.get('url')}) · 作者/频道：{creator or '未知'}"
+        ),
         "",
-    ]
+    ])
     frame_plan = plan_frame_evidence_groups(paragraphs, frames)
     for paragraph_index, paragraph in enumerate(paragraphs):
         if paragraph.heading:
@@ -192,8 +213,9 @@ def update_indexes(vault: Path, note_path: Path, metadata: dict[str, Any]) -> No
     task_key = str(metadata.get("task_key") or "")
     day = str(metadata.get("task_date") or "")
     title = str(metadata.get("title") or note_path.stem)
+    creator = str(metadata.get("author") or metadata.get("owner") or "未知作者")
     target = note_path.relative_to(vault).with_suffix("").as_posix()
-    entry = f"- [[{target}|{title}]] · `{task_key}` · {metadata.get('owner') or '未知 UP 主'}"
+    entry = f"- [[{target}|{title}]] · `{task_key}` · {creator}"
     with _index_lock(vault):
         master = vault / "Indexes" / "视频资料库.md"
         daily = vault / "Indexes" / "Daily" / f"{day}.md"

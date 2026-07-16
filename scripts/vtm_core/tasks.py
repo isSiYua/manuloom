@@ -50,6 +50,10 @@ def _connect() -> sqlite3.Connection:
             daily_no INTEGER NOT NULL,
             task_key TEXT NOT NULL UNIQUE,
             bvid TEXT,
+            platform TEXT NOT NULL DEFAULT 'bilibili',
+            source_kind TEXT NOT NULL DEFAULT 'video',
+            source_id TEXT,
+            source_key TEXT,
             part INTEGER NOT NULL DEFAULT 1,
             url TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL,
@@ -73,9 +77,24 @@ def _connect() -> sqlite3.Connection:
         "pid": "INTEGER",
         "stage": "INTEGER",
         "stage_message": "TEXT",
+        "platform": "TEXT NOT NULL DEFAULT 'bilibili'",
+        "source_kind": "TEXT NOT NULL DEFAULT 'video'",
+        "source_id": "TEXT",
+        "source_key": "TEXT",
     }.items():
         if name not in existing_columns:
             connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS tasks_source_key_idx ON tasks(source_key)"
+    )
+    connection.execute(
+        """
+        UPDATE tasks
+        SET source_id = COALESCE(source_id, bvid),
+            source_key = COALESCE(source_key, 'bilibili:' || bvid || ':p' || part)
+        WHERE bvid IS NOT NULL AND bvid != ''
+        """
+    )
     return connection
 
 
@@ -108,15 +127,23 @@ def _insert_imported(connection: sqlite3.Connection, item: dict[str, Any]) -> No
     connection.execute(
         """
         INSERT OR IGNORE INTO tasks
-        (task_date, daily_no, task_key, bvid, url, title, status, created_at, updated_at,
+        (task_date, daily_no, task_key, bvid, platform, source_kind, source_id, source_key,
+         url, title, status, created_at, updated_at,
          job_dir, note, bundle, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             day,
             next_no,
             f"{compact}-{next_no}",
             item.get("bvid"),
+            item.get("platform") or "bilibili",
+            item.get("source_kind") or "video",
+            item.get("source_id") or item.get("bvid"),
+            item.get("source_key") or (
+                f"bilibili:{item.get('bvid')}:p{int(item.get('part') or 1)}"
+                if item.get("bvid") else None
+            ),
             item.get("url") or "",
             item.get("title") or item.get("bvid") or "历史视频笔记",
             item.get("status") or "complete",
@@ -177,6 +204,10 @@ def reserve_task(
     url: str,
     bvid: str | None = None,
     part: int = 1,
+    platform: str = "bilibili",
+    source_kind: str = "video",
+    source_id: str | None = None,
+    source_key: str | None = None,
     status: str = "running",
 ) -> dict[str, Any]:
     connection = _connect()
@@ -194,17 +225,22 @@ def reserve_task(
         connection.execute(
             """
             INSERT INTO tasks
-            (task_date, daily_no, task_key, bvid, part, url, title, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (task_date, daily_no, task_key, bvid, platform, source_kind, source_id, source_key,
+             part, url, title, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 day,
                 daily_no,
                 task_key,
                 bvid,
+                platform,
+                source_kind,
+                source_id or bvid,
+                source_key or (f"bilibili:{bvid}:p{part}" if bvid else None),
                 part,
                 url,
-                bvid or "正在读取视频信息",
+                source_id or bvid or "正在读取来源信息",
                 status,
                 now,
                 now,
@@ -243,7 +279,8 @@ def get_task(vault: Path, identity: str | int, *, include_deleted: bool = False)
 def update_task(vault: Path, identity: str | int, **updates: Any) -> dict[str, Any]:
     current = get_task(vault, identity, include_deleted=True)
     allowed = {
-        "bvid", "part", "url", "title", "status", "job_dir", "note", "bundle",
+        "bvid", "platform", "source_kind", "source_id", "source_key", "part", "url",
+        "title", "status", "job_dir", "note", "bundle",
         "error", "deleted_at", "trash_dir", "pid", "stage", "stage_message",
     }
     values = {key: value for key, value in updates.items() if key in allowed}

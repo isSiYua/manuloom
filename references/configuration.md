@@ -45,6 +45,7 @@ scripts/vtm prepare-asr
 | `VTM_MAX_VISION_FRAMES` | Hard cost ceiling for distinct AI-requested frames sent to the optional vision model; not a sampling target | `60` |
 | `VTM_MAX_CONCURRENT_JOBS` | Maximum detached video workers on one server; values above `4` are clamped | `2` |
 | `VTM_PROGRESS_TARGET` | Optional Hermes one-shot delivery target, such as `feishu` or `feishu:chat_id` | unset |
+| `VTM_SOURCE_PROXY` | Optional HTTPS proxy used only for remote source acquisition on restricted server networks | unset |
 | `VTM_PYTHON` | Prepared Python 3.10+ interpreter used by `scripts/vtm`; set in the service environment, not the CLI env file | auto-detect |
 
 Keep secrets in the service manager's secret store or an environment file readable only by the service account. Do not put them in `SKILL.md`, Obsidian, job JSON, logs, or Agent prompts.
@@ -101,7 +102,19 @@ scripts/vtm configure secret bilibili_cookie
 
 The dedicated store defaults to `~/.config/video-to-detailed-manuscript/secrets.env`; its directory is `0700`, the file and lock are `0600`, and writes are atomic. It contains only allowlisted project variables. The loader reads this project file first and fills still-missing allowlisted values from the legacy `~/.hermes/.env`; it never loads unrelated environment entries. Status output contains booleans and labels only.
 
-Public acquisition is preferred. Bilibili public videos need no credential; its complete Cookie header is optional. YouTube's API Key is an optional future metadata/API enhancement, not a universal subtitle credential. Public Zhihu pages are planned without a key, while its official Access Secret enables only the APIs actually granted. Douyin official client credentials apply only to reviewed applications and authorized scopes. The currently documented Xiaohongshu merchant/mini-app credentials are not treated as a general public-note reading API.
+Public acquisition is preferred. Bilibili public videos need no credential; its complete Cookie header is optional. YouTube public video extraction is installed and needs no API Key; a Data API Key remains an optional metadata/API enhancement, not a universal subtitle credential. Public Zhihu pages are planned without a key, while its official Access Secret enables only the APIs actually granted. Douyin official client credentials apply only to reviewed applications and authorized scopes. The currently documented Xiaohongshu merchant/mini-app credentials are not treated as a general public-note reading API.
+
+## YouTube acquisition
+
+Public `youtube.com` and `youtu.be` video links need no API Key. The adapter canonicalizes the video ID, prefers creator-provided subtitles, then selects an original-language automatic caption track. It does not silently choose an automatic translation merely because it is Chinese. If no transcript is available, it downloads one audio stream for the prepared local ASR. Visual analysis remains capped at 720p; retained frames are remotely re-captured from the highest available stream up to the configured 1080p request.
+
+All yt-dlp metadata and media requests have bounded socket retries. Mainland servers may be unable to reach YouTube even though the adapter is correct. In that deployment, set a privately operated, policy-compliant HTTPS proxy with hidden input:
+
+```bash
+scripts/vtm configure secret source_proxy
+```
+
+Do not use public proxy lists or place a proxy URL containing credentials in chat, source code, `.env.example`, logs, or task artifacts. A proxy changes reachability only; it does not bypass login, payment, copyright, geographic, or platform controls.
 
 ## Server baseline
 

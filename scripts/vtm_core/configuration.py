@@ -34,6 +34,7 @@ class PlatformSpec:
 SECRET_SPECS = (
     SecretSpec("text_llm_key", "VTM_LLM_API_KEY", "文字编辑模型 API Key", "core", False),
     SecretSpec("vision_api_key", "VTM_VISION_API_KEY", "视觉模型 API Key", "core"),
+    SecretSpec("source_proxy", "VTM_SOURCE_PROXY", "境外来源 HTTPS 代理 URL", "core"),
     SecretSpec("bilibili_cookie", "BILIBILI_COOKIE", "Bilibili 完整 Cookie Header", "bilibili"),
     SecretSpec("youtube_api_key", "YOUTUBE_API_KEY", "YouTube Data API Key", "youtube"),
     SecretSpec("zhihu_access_secret", "ZHIHU_ACCESS_SECRET", "知乎开放平台 Access Secret", "zhihu"),
@@ -58,8 +59,8 @@ PLATFORM_SPECS = (
         "youtube",
         "YouTube",
         ("youtube", "油管"),
-        False,
-        "计划支持公开视频无凭据模式。Data API Key 只作为官方元数据/API 增强。",
+        True,
+        "公开视频无凭据模式可用。Data API Key 只作为可选官方元数据/API 增强。",
         ("youtube_api_key",),
         "https://console.cloud.google.com/apis/credentials",
         "用户私有数据需要独立 OAuth 授权；API Key 不等于任意字幕读取权限。",
@@ -290,7 +291,10 @@ def secret_specs_public() -> list[dict[str, object]]:
             "label": spec.label,
             "platform": spec.platform,
             "optional": spec.optional,
-            "configured": bool(os.getenv(spec.env_key)),
+            "configured": bool(
+                os.getenv(spec.env_key)
+                or (spec.id == "text_llm_key" and os.getenv("DEEPSEEK_API_KEY"))
+            ),
         }
         for spec in SECRET_SPECS
     ]

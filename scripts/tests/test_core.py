@@ -95,6 +95,13 @@ from vtm_core.visual import (
     vision_priority_ids,
     vision_priority_ids_for_requests,
 )
+from vtm_core.youtube import (
+    YouTubeClient,
+    YouTubeSourceAdapter,
+    YouTubeVideoInfo,
+    parse_youtube_json3,
+    parse_youtube_vtt,
+)
 from video_manuscript import (
     bundle_job,
     cancel_job,
@@ -352,6 +359,18 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(payload["secrets"]["secret_values_printed_or_searched"])
         self.assertTrue(payload["acquisition"]["source_adapter_registry"])
         self.assertFalse(payload["acquisition"]["future_sources_fork_manuscript_core"])
+        self.assertEqual(
+            payload["acquisition"]["installed_video_platforms"],
+            ["bilibili", "youtube"],
+        )
+        self.assertFalse(payload["acquisition"]["youtube_public_mode_requires_api_key"])
+        self.assertTrue(
+            payload["acquisition"]["youtube_automatic_caption_prefers_original_language"]
+        )
+        self.assertEqual(
+            payload["tasks"]["cross_platform_identity_fields"],
+            ["platform", "source_kind", "source_id", "source_key"],
+        )
         self.assertFalse(payload["secrets"]["chat_secret_delivery_allowed"])
         self.assertEqual(payload["secrets"]["dedicated_secret_file_permissions"], "0600")
         self.assertTrue(payload["configuration"]["deterministic_platform_menu"])
@@ -2029,6 +2048,135 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reference.author, "作者")
         with self.assertRaises(ValueError):
             adapter_for("https://example.com/article")
+
+    def test_youtube_adapter_normalizes_supported_public_urls(self):
+        client = YouTubeClient()
+        video_id = "BaW_jenozKc"
+        for value in (
+            video_id,
+            f"https://youtu.be/{video_id}?si=test",
+            f"https://www.youtube.com/watch?v={video_id}&list=ignored",
+            f"https://www.youtube.com/shorts/{video_id}",
+        ):
+            self.assertEqual(
+                client.normalize_input_url(value),
+                f"https://www.youtube.com/watch?v={video_id}",
+            )
+        adapter = adapter_for(f"https://youtu.be/{video_id}")
+        self.assertIsInstance(adapter, YouTubeSourceAdapter)
+        self.assertEqual(adapter.source_id_from_url(video_id), video_id)
+        with self.assertRaises(ValueError):
+            client.video_id(f"https://youtube.com.evil.example/watch?v={video_id}")
+
+    def test_youtube_json3_and_vtt_parsers_preserve_timestamps_and_text(self):
+        json3 = json.dumps(
+            {
+                "events": [
+                    {"tStartMs": 1000, "dDurationMs": 1500, "segs": [{"utf8": "第一句"}]},
+                    {"tStartMs": 2500, "dDurationMs": 1000, "segs": [{"utf8": "第二句"}]},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        parsed_json = parse_youtube_json3(json3)
+        self.assertEqual([item.text for item in parsed_json], ["第一句", "第二句"])
+        self.assertEqual((parsed_json[0].start, parsed_json[0].end), (1.0, 2.5))
+
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+<c>第一句</c>
+
+00:00:02.500 --> 00:00:03.500 align:start
+第二句 &amp; 细节
+"""
+        parsed_vtt = parse_youtube_vtt(vtt)
+        self.assertEqual([item.text for item in parsed_vtt], ["第一句", "第二句 & 细节"])
+        self.assertEqual(parsed_vtt[1].start, 2.5)
+
+    def test_youtube_prefers_manual_subtitles_over_automatic_captions(self):
+        video_id = "BaW_jenozKc"
+        client = YouTubeClient()
+        payload = {
+            "id": video_id,
+            "subtitles": {
+                "zh-CN": [
+                    {
+                        "ext": "json3",
+                        "url": "https://www.youtube.com/api/timedtext?manual=1",
+                    }
+                ]
+            },
+            "automatic_captions": {
+                "zh-CN": [
+                    {
+                        "ext": "json3",
+                        "url": "https://www.youtube.com/api/timedtext?auto=1",
+                    }
+                ]
+            },
+        }
+        client._cache[f"{video_id}:metadata"] = payload
+        response_body = json.dumps(
+            {
+                "events": [
+                    {"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "人工字幕"}]}
+                ]
+            },
+            ensure_ascii=False,
+        ).encode()
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def geturl(self):
+                return "https://www.youtube.com/api/timedtext?manual=1"
+
+            def read(self):
+                return response_body
+
+        info = YouTubeVideoInfo(
+            url=f"https://www.youtube.com/watch?v={video_id}",
+            video_id=video_id,
+            title="测试",
+            duration=1,
+            owner="频道",
+            language="zh-CN",
+        )
+        with patch("vtm_core.youtube.urllib.request.urlopen", return_value=Response()):
+            segments, metadata = client.subtitles(info)
+        self.assertEqual(segments[0].text, "人工字幕")
+        self.assertEqual(metadata["source"], "youtube_manual_subtitle")
+
+    def test_youtube_automatic_caption_selection_prefers_original_language(self):
+        tracks = {
+            "zh-Hans": [{"ext": "json3", "url": "https://www.youtube.com/translated"}],
+            "en-orig": [{"ext": "json3", "url": "https://www.youtube.com/original"}],
+        }
+        language, entry = YouTubeClient._track(tracks, "", prefer_original=True)
+        self.assertEqual(language, "en-orig")
+        self.assertTrue(entry["url"].endswith("/original"))
+
+    def test_task_registry_persists_generic_source_identity(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
+        ):
+            vault = Path(temp) / "vault"
+            task = reserve_task(
+                vault,
+                url="https://www.youtube.com/watch?v=BaW_jenozKc",
+                platform="youtube",
+                source_kind="video",
+                source_id="BaW_jenozKc",
+                source_key="youtube:BaW_jenozKc",
+            )
+            self.assertEqual(task["platform"], "youtube")
+            self.assertEqual(task["source_key"], "youtube:BaW_jenozKc")
+            self.assertIsNone(task["bvid"])
 
     def test_configuration_menu_is_deterministic_and_never_returns_secret_values(self):
         env = {
@@ -3997,6 +4145,55 @@ class CoreTests(unittest.TestCase):
             self.assertIn("正在提取并匹配关键画面。", progress)
             self.assertEqual(progress[-1], "处理完成。")
 
+    def test_youtube_no_visual_pipeline_reuses_the_frozen_manuscript_core(self):
+        info = YouTubeVideoInfo(
+            url="https://www.youtube.com/watch?v=BaW_jenozKc",
+            video_id="BaW_jenozKc",
+            title="YouTube 测试视频",
+            duration=12,
+            owner="测试频道",
+            language="zh-CN",
+        )
+
+        class FakeYouTubeClient:
+            def inspect(self, url):
+                return info
+
+            def subtitles(self, inspected):
+                return [Segment("s000001", 0, 2, "完整的公开视频内容。")], {
+                    "source": "youtube_manual_subtitle",
+                    "language": "zh-CN",
+                }
+
+        adapter = YouTubeSourceAdapter(FakeYouTubeClient())
+        editor = SequenceClient(direct_manuscript_responses("完整的公开视频内容。"))
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
+        ), patch("vtm_core.pipeline.adapter_for", return_value=adapter), patch(
+            "vtm_core.pipeline.text_client", return_value=editor
+        ):
+            result = run(
+                Options(
+                    url=info.url,
+                    vault=Path(temp) / "vault",
+                    no_visual=True,
+                    task_key="20260717-1",
+                    task_date="2026-07-17",
+                )
+            )
+            note = Path(result["note"])
+            note_text = note.read_text(encoding="utf-8")
+            metadata = json.loads(
+                (Path(temp) / "state" / "tasks" / "20260717-1" / "metadata.json").read_text()
+            )
+        self.assertEqual(result["platform"], "youtube")
+        self.assertEqual(result["source_key"], "youtube:BaW_jenozKc")
+        self.assertEqual(result["transcript_source"], "youtube_manual_subtitle")
+        self.assertIn("tags: [video-manuscript, youtube]", note_text)
+        self.assertIn("作者/频道：测试频道", note_text)
+        self.assertEqual(metadata["pipeline_version"], PIPELINE_VERSION)
+        self.assertEqual(editor.calls, 4)
+
     def test_failure_after_indexing_rolls_back_note_assets_and_index_rows(self):
         info = VideoInfo(
             url="https://www.bilibili.com/video/BV1ab411c7DE",
@@ -4090,7 +4287,7 @@ class CoreTests(unittest.TestCase):
             os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
         ), patch(
             "vtm_core.pipeline.BilibiliClient", FakeBilibili
-        ), patch("vtm_core.pipeline.download_media", side_effect=fake_download), patch(
+        ), patch("vtm_core.media.download_media", side_effect=fake_download), patch(
             "vtm_core.pipeline.transcribe",
             return_value=([Segment("s000001", 0, 2, "完整内容。")], {"source": "funasr_paraformer"}),
         ), patch("vtm_core.pipeline.text_client", return_value=editor):
@@ -4133,7 +4330,7 @@ class CoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.dict(
             os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
         ), patch("vtm_core.pipeline.BilibiliClient", FakeBilibili), patch(
-            "vtm_core.pipeline.download_media", side_effect=fake_download
+            "vtm_core.media.download_media", side_effect=fake_download
         ), patch(
             "vtm_core.pipeline.transcribe", side_effect=RuntimeError("ASR failed")
         ):
@@ -4180,7 +4377,7 @@ class CoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.dict(
             os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
         ), patch("vtm_core.pipeline.BilibiliClient", FakeBilibili), patch(
-            "vtm_core.pipeline.download_media", side_effect=fake_download
+            "vtm_core.media.download_media", side_effect=fake_download
         ), patch("vtm_core.pipeline.transcribe", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 run(

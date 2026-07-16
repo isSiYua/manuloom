@@ -1,11 +1,11 @@
 ---
 name: video-to-detailed-manuscript
-description: "Convert Bilibili, b23.tv, BV, or av video links into detailed illustrated Obsidian manuscripts and manage server-side results through natural Chinese. Always use for a supported video link or requests such as '提取这个视频', '任务列表', '所有笔记列表', '下载 1', 'download 1', '下载 20260716-1', '删除 1', '确认删除 1', '恢复 20260716-1', '终止任务', '协议自检', or '暂存'. Produce an edited full-content note rather than a summary or verbatim dump: preserve every useful explanation, example, step, command, datum, qualifier, name, and caveat; remove fillers and genuine repetition; place useful frames beside the matching passage. Also use to list, package, send, soft-delete, restore, cancel, self-check, or inspect existing video-note tasks."
+description: "Convert public Bilibili, b23.tv, BV, av, YouTube, or youtu.be video links into detailed illustrated Obsidian manuscripts and manage server-side results through natural Chinese. Always use for a supported video link or requests such as '提取这个视频', '任务列表', '所有笔记列表', '下载 1', 'download 1', '下载 20260716-1', '删除 1', '确认删除 1', '恢复 20260716-1', '终止任务', '协议自检', or '暂存'. Produce an edited full-content note rather than a summary or verbatim dump: preserve every useful explanation, example, step, command, datum, qualifier, name, and caveat; remove fillers and genuine repetition; place useful frames beside the matching passage. Also use to list, package, send, soft-delete, restore, cancel, self-check, or inspect existing video-note tasks."
 ---
 
 # Create and manage detailed video manuscripts
 
-Use the bundled CLI as the only execution path. Resolve the directory containing this `SKILL.md` once and invoke the executable `scripts/vtm` launcher by its absolute path; never assume the Agent's current working directory is the Skill directory. Treat a Bilibili URL by itself as a complete extraction request. Do not ask the user to repeat output requirements or remember commands.
+Use the bundled CLI as the only execution path. Resolve the directory containing this `SKILL.md` once and invoke the executable `scripts/vtm` launcher by its absolute path; never assume the Agent's current working directory is the Skill directory. Treat a supported Bilibili or YouTube URL by itself as a complete extraction request. Do not ask the user to repeat output requirements or remember commands.
 
 ## Output contract
 
@@ -98,7 +98,7 @@ The CLI requires a TTY, hides input, writes only an allowlisted value to the pro
 2. Run once:
 
 ```bash
-<skill-root>/scripts/vtm submit --url 'https://www.bilibili.com/video/BV.../' --gateway-output --progress-target feishu
+<skill-root>/scripts/vtm submit --url '<supported-public-video-url>' --gateway-output --progress-target feishu
 ```
 
 On Hermes messaging platforms, use exactly one short foreground terminal call for `submit`; the command itself detaches the real worker and releases the chat. Do not use `terminal(background=true)`, `process(wait)`, a long timeout, a shell-level `&`/`nohup`, or a second interpreter command. The launcher chooses one prepared Python runtime before the detached CLI reserves a task number. If submission itself fails, report that single failure; never retry with another Python executable.
@@ -218,11 +218,11 @@ Do not invent a checkbox when the host lacks a generic interactive-card API. Nat
 
 Use the bounded built-in chain:
 
-1. Prefer Bilibili native/manual or ordinary AI subtitle tracks; this downloads no audio.
-2. With an optional login cookie, try Bilibili's timestamped AI-conclusion transcript.
-3. If no transcript exists, download one audio stream and run the preloaded local ASR.
+1. For Bilibili, prefer native/manual or ordinary AI subtitle tracks; this downloads no audio. With an optional login cookie, next try Bilibili's timestamped AI-conclusion transcript.
+2. For YouTube, prefer a creator-provided subtitle track, then an original-language automatic caption track. Do not silently choose an auto-translated track merely because it matches the manuscript language.
+3. If the selected platform exposes no transcript, download one audio stream and run the preloaded local ASR.
 4. Use yt-dlp only after the direct player stream fails.
-5. Use at most a 720p video-only stream for scene detection, OCR prefiltering, deduplication, and frame selection. A dedicated DeepSeek visual planner reads the complete timestamped transcript plus the approved article plan and decides which time ranges need visual evidence without modifying the prose plan. Inside those ranges, treat every locally distinct scene/slide change as a candidate rather than sampling once per minute. Paid vision review is therefore dynamic: a slide-dense technical video may use many frames while a visually sparse conversation may use none. The default candidate and paid-vision safety ceiling is 60, configurable with `--max-frames` and `VTM_MAX_VISION_FRAMES`; it is a hard cost ceiling, not a target. Preserve multiple distinct visual items for one paragraph when they carry different information, and remove adjacent near-duplicates. After deciding which images must remain, seek only those timestamps from the highest available stream up to 1080p and replace the analysis frames. Record the actual returned height; never claim 1080p when Bilibili only exposes 720p/480p. Extract complete simple text/list/table/code/formula evidence into copyable Markdown/LaTeX first and remove its frame only after completeness is proven. Keep diagrams, architecture/process charts, paper figures, complex UI, partial OCR, dense prompts, and any visually irreplaceable evidence immediately after the matching passage.
+5. Use at most a 720p video-only stream for scene detection, OCR prefiltering, deduplication, and frame selection. A dedicated DeepSeek visual planner reads the complete timestamped transcript plus the approved article plan and decides which time ranges need visual evidence without modifying the prose plan. Inside those ranges, treat every locally distinct scene/slide change as a candidate rather than sampling once per minute. Paid vision review is therefore dynamic: a slide-dense technical video may use many frames while a visually sparse conversation may use none. The default candidate and paid-vision safety ceiling is 60, configurable with `--max-frames` and `VTM_MAX_VISION_FRAMES`; it is a hard cost ceiling, not a target. Preserve multiple distinct visual items for one paragraph when they carry different information, and remove adjacent near-duplicates. After deciding which images must remain, seek only those timestamps from the highest available stream up to 1080p and replace the analysis frames. Record the actual returned height; never claim 1080p when the platform only exposes a lower stream. Extract complete simple text/list/table/code/formula evidence into copyable Markdown/LaTeX first and remove its frame only after completeness is proven. Keep diagrams, architecture/process charts, paper figures, complex UI, partial OCR, dense prompts, and any visually irreplaceable evidence immediately after the matching passage.
 
 Discard decorative or zero-information-gain frames even when they are temporally aligned: presenter avatars, stock/cartoon illustrations, watermarks, repeated subtitles/titles, simple labels with decorative icons, and a single arrow whose full meaning is already present in prose. A verbose vision description alone never makes a simple screen “dense.” Classification failure still keeps the aligned original conservatively.
 
@@ -261,6 +261,7 @@ Load only allowlisted variables from the deployment environment. Never read, pri
 - Text: `VTM_LLM_API_KEY` or `DEEPSEEK_API_KEY`, optional `VTM_LLM_BASE_URL`, `VTM_LLM_MODEL`.
 - Vision: `VTM_VISION_API_KEY`, `VTM_VISION_BASE_URL`, `VTM_VISION_MODEL`.
 - Optional Bilibili login: `BILIBILI_COOKIE` or `--cookies-file`.
+- Optional outbound source proxy for a server that cannot reach a supported public platform directly: `VTM_SOURCE_PROXY`. Configure it through hidden TTY input; never paste a credential-bearing proxy URL into chat.
 - Storage: `VTM_VAULT`, `VTM_STATE_DIR`, `VTM_TIMEZONE`.
 
 Read [configuration.md](references/configuration.md) for model and server setup, [agent-installation.md](references/agent-installation.md) for Agent integration, [artifact-schema.md](references/artifact-schema.md) when extending files, and [design-research.md](references/design-research.md) before changing acquisition or ASR behavior.

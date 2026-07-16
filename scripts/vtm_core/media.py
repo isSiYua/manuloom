@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import random
 import shutil
 import string
@@ -86,9 +87,13 @@ def download_media(
         "no_warnings": True,
         "retries": 3,
         "fragment_retries": 3,
+        "socket_timeout": 20,
+        "extractor_retries": 2,
     }
     if cookies_file:
         options["cookiefile"] = str(cookies_file)
+    if os.getenv("VTM_SOURCE_PROXY"):
+        options["proxy"] = os.environ["VTM_SOURCE_PROXY"]
     if audio_only:
         options.update({"format": "bestaudio/best", "postprocessors": []})
     else:
