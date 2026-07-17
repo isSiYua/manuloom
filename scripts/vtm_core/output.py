@@ -11,6 +11,10 @@ from .visual import hash_distance
 
 NEARBY_DUPLICATE_SECONDS = 12.0
 NEARBY_DUPLICATE_HASH_DISTANCE = 0.12
+PROGRESSIVE_SECTION_HASH_DISTANCE = 0.08
+PROGRESSIVE_VISUAL_KINDS = {
+    "diagram", "chart", "process", "ui", "paper_figure", "comparison",
+}
 
 
 def yaml_scalar(value: Any) -> str:
@@ -35,16 +39,28 @@ def plan_frame_evidence_groups(
     # when they were assigned to neighbouring paragraphs.
     confidence_rank = {"high": 3, "medium": 2, "low": 1, "unknown": 0}
     completeness_rank = {"complete": 3, "partial": 2, "unknown": 0}
+    gain_rank = {"substantial": 3, "partial": 2, "none": 0, "unknown": 0}
+    density_rank = {"high": 3, "medium": 2, "low": 1, "unknown": 0}
 
     def evidence_score(frame: Frame) -> tuple[float, ...]:
         return (
+            gain_rank.get(frame.information_gain, 0),
             confidence_rank.get(frame.evidence_confidence, 0),
             completeness_rank.get(frame.evidence_completeness, 0),
+            density_rank.get(frame.information_density, 0),
             frame.ocr_confidence,
             len(frame.vision_description),
             frame.contrast,
             frame.brightness,
             frame.timestamp,
+        )
+
+    def progressive_score(frame: Frame) -> tuple[int, ...]:
+        return (
+            gain_rank.get(frame.information_gain, 0),
+            completeness_rank.get(frame.evidence_completeness, 0),
+            density_rank.get(frame.information_density, 0),
+            confidence_rank.get(frame.evidence_confidence, 0),
         )
 
     kept: list[Frame] = []
@@ -70,6 +86,51 @@ def plan_frame_evidence_groups(
             kept[kept.index(duplicate)] = frame
         else:
             frame.extracted_markdown = ""
+
+    # Progressive PPT/whiteboard pages may accumulate annotations for several
+    # minutes without changing template.  Within one semantic section, replace
+    # a weaker same-template image only when the later/other variant has a
+    # strictly stronger classified evidence score.  Equal-strength stages,
+    # different sections, and text converted to Markdown remain untouched.
+    section_by_paragraph: dict[int, int] = {}
+    section_index = -1
+    for paragraph_index, paragraph in enumerate(paragraphs):
+        if paragraph_index == 0 or paragraph.heading:
+            section_index += 1
+        section_by_paragraph[paragraph_index] = section_index
+    progressive_kept: list[Frame] = []
+    for frame in kept:
+        frame_section = section_by_paragraph.get(frame.paragraph_index or 0)
+        replacement_index: int | None = None
+        for index, existing in enumerate(progressive_kept):
+            existing_section = section_by_paragraph.get(existing.paragraph_index or 0)
+            if frame_section != existing_section:
+                continue
+            if not frame.keep_image or not existing.keep_image:
+                continue
+            if (
+                frame.content_kind not in PROGRESSIVE_VISUAL_KINDS
+                or existing.content_kind not in PROGRESSIVE_VISUAL_KINDS
+                or not frame.ahash
+                or not existing.ahash
+                or hash_distance(frame.ahash, existing.ahash)
+                > PROGRESSIVE_SECTION_HASH_DISTANCE
+            ):
+                continue
+            frame_score = progressive_score(frame)
+            existing_score = progressive_score(existing)
+            if frame_score == existing_score:
+                continue
+            replacement_index = index
+            if frame_score > existing_score:
+                existing.extracted_markdown = ""
+                progressive_kept[index] = frame
+            else:
+                frame.extracted_markdown = ""
+            break
+        if replacement_index is None:
+            progressive_kept.append(frame)
+    kept = progressive_kept
 
     groups: dict[int, list[Frame]] = {}
     for frame in sorted(kept, key=lambda item: item.timestamp):

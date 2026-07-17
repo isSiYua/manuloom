@@ -501,10 +501,12 @@ class CoreTests(unittest.TestCase):
         self.assertIn("只规划文章，不写正文", DIRECT_OUTLINE_PROMPT)
         self.assertIn("must_keep", DIRECT_OUTLINE_PROMPT)
         self.assertIn("visual_requests", DIRECT_OUTLINE_PROMPT)
+        self.assertIn("相邻的“概述/详解”", DIRECT_OUTLINE_PROMPT)
+        self.assertIn("只有进入新的处理阶段", DIRECT_OUTLINE_PROMPT)
 
     def test_asr_reconciliation_release_uses_reviewed_text_prompts(self):
         expected = {
-            "outline": "6612f3bc5d17faee86f3d5b6b943ea71390b31000a05c0e423133b452f0465f5",
+            "outline": "d9821d98606f92316162421a932f80d45d04e313663f5058a010bd94a2a749cc",
             "writer": "35a82480f03ad66ef15804c7ca9f75f7d6452b8e03d773ade19cd16bae28ee6d",
             "detail": "40db15ed73c920bce274baca61aff4ebc05dfab212be992d6e1e6efd965b9497",
             "review": "f9e22917db7f869582d86f6f2f69aedc724a0174804b95befbd5963a50f2d3f1",
@@ -3867,15 +3869,22 @@ class CoreTests(unittest.TestCase):
         self.assertAlmostEqual(brightness, 0.5, places=2)
         self.assertGreater(contrast, 0.9)
 
-    def test_text_evidence_windows_keep_small_same_template_changes(self):
-        requests = [{
-            "time_start": 90,
-            "time_end": 100,
-            "purpose": "核验连续两句技术结论",
-            "expected_kind": "text",
-        }]
-        self.assertEqual(duplicate_distance_threshold(95, requests), 0.045)
-        self.assertEqual(duplicate_distance_threshold(120, requests), 0.10)
+    def test_requested_progressive_evidence_keeps_small_same_template_changes(self):
+        progressive_change = 0.06
+        for kind in (
+            "text", "list", "table", "code", "formula", "diagram",
+            "chart", "process", "ui", "paper_figure", "comparison",
+        ):
+            requests = [{
+                "time_start": 90,
+                "time_end": 100,
+                "purpose": "核验逐步补充后的完整证据",
+                "expected_kind": kind,
+            }]
+            threshold = duplicate_distance_threshold(95, requests)
+            self.assertEqual(threshold, 0.045)
+            self.assertGreater(progressive_change, threshold)
+            self.assertEqual(duplicate_distance_threshold(120, requests), 0.10)
 
     def test_vision_budget_is_temporally_distributed_and_uses_best_in_each_region(self):
         self.assertEqual(DEFAULT_VISION_FRAME_BUDGET, 6)
@@ -3986,6 +3995,55 @@ class CoreTests(unittest.TestCase):
             self.assertIn("architecture.png", rendered)
             self.assertIn("flowchart.png", rendered)
             self.assertLess(rendered.index("架构图和流程图"), rendered.index("architecture.png"))
+
+    def test_same_section_progressive_slide_prefers_strictly_stronger_completion(self):
+        paragraphs = [
+            Paragraph(["s1"], "介绍图像与标签。", 0, 100, heading="图像与标签处理"),
+            Paragraph(["s2"], "说明最终张量。", 100, 220),
+        ]
+        early = Frame(
+            20,
+            "/tmp/early.png",
+            ["s1"],
+            paragraph_index=0,
+            content_kind="ui",
+            information_gain="partial",
+            information_density="medium",
+            evidence_confidence="high",
+            evidence_completeness="complete",
+            ahash="0" * 64,
+        )
+        complete = Frame(
+            200,
+            "/tmp/complete.png",
+            ["s2"],
+            paragraph_index=1,
+            content_kind="diagram",
+            information_gain="substantial",
+            information_density="high",
+            evidence_confidence="high",
+            evidence_completeness="complete",
+            ahash="f" * 4 + "0" * 60,
+        )
+        groups = plan_frame_evidence_groups(paragraphs, [early, complete])
+        self.assertNotIn(0, groups)
+        self.assertEqual(groups[1], [complete])
+
+    def test_same_template_visuals_are_not_collapsed_across_sections_or_equal_strength(self):
+        paragraphs = [
+            Paragraph(["s1"], "训练图。", 0, 100, heading="训练"),
+            Paragraph(["s2"], "训练的另一阶段。", 100, 200),
+            Paragraph(["s3"], "检测图。", 200, 300, heading="检测"),
+        ]
+        frames = [
+            Frame(20, "/tmp/a.png", ["s1"], paragraph_index=0, content_kind="diagram", information_gain="substantial", evidence_confidence="high", evidence_completeness="complete", information_density="high", ahash="0" * 64),
+            Frame(150, "/tmp/b.png", ["s2"], paragraph_index=1, content_kind="diagram", information_gain="substantial", evidence_confidence="high", evidence_completeness="complete", information_density="high", ocr_text="另一阶段包含更多可读文字", ocr_confidence=96, vision_description="描述长度不同但证据等级相同。", ahash="f" * 4 + "0" * 60),
+            Frame(250, "/tmp/c.png", ["s3"], paragraph_index=2, content_kind="diagram", information_gain="partial", evidence_confidence="medium", evidence_completeness="partial", information_density="medium", ahash="0" * 64),
+        ]
+        groups = plan_frame_evidence_groups(paragraphs, frames)
+        self.assertEqual(groups[0], [frames[0]])
+        self.assertEqual(groups[1], [frames[1]])
+        self.assertEqual(groups[2], [frames[2]])
 
     def test_multiple_complete_text_slides_merge_as_copyable_notes_without_images(self):
         paragraphs = [Paragraph(["s1"], "作者依次展示两页名单。", 0, 20)]

@@ -24,7 +24,10 @@ DEFAULT_VISION_FRAME_BUDGET = 6
 # minute while talking-head videos may use none.
 MAX_ADAPTIVE_VISION_FRAME_BUDGET = 60
 MAX_PAID_VISION_REVIEWS_PER_MINUTE = 2
-TEXT_SENSITIVE_VISUAL_KINDS = {"text", "list", "table", "code", "formula"}
+TEXT_SENSITIVE_VISUAL_KINDS = {
+    "text", "list", "table", "code", "formula",
+    "diagram", "chart", "process", "ui", "paper_figure", "comparison",
+}
 
 
 def asset_filename(task_key: str, index: int, at: float) -> str:
@@ -172,13 +175,14 @@ def duplicate_distance_threshold(
     timestamp_value: float,
     visual_requests: list[dict[str, object]] | None,
 ) -> float:
-    """Use stricter deduplication inside requested text evidence windows.
+    """Use stricter deduplication inside requested evidence windows.
 
-    Consecutive slides can share the same template while changing only one
-    sentence.  A 32x32 average hash sees those frames as near-identical, even
-    though the second sentence may reverse the technical conclusion.  Keep
-    those small visual changes for OCR/vision review; downstream information-
-    gain classification still removes genuinely repeated or decorative frames.
+    Consecutive slides and progressive PPT/whiteboard demonstrations can share
+    the same template while changing only one sentence, annotation, diagram
+    edge, or completed result.  A 32x32 average hash sees those frames as near-
+    identical.  Keep the small changes for OCR/vision review; downstream
+    information-gain classification still removes genuinely repeated or
+    decorative frames.
     """
     for request in visual_requests or []:
         try:

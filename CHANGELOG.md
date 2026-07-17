@@ -20,6 +20,7 @@
 - Adds public Xiaohongshu/RedNote image-note support by adapting the Apache-2.0 Social Media Toolkit initial-state parser, preserving ordered body blocks, topics, and all original images without a key or Cookie.
 - Supports `xiaohongshu.com`, the current `rednote.com` domain, `xhslink.com`, and share text; rejects video notes, login/captcha/deleted/risk-control pages, and untrusted image hosts.
 - Normalizes equivalent full-width/half-width punctuation in ASR reconciliation anchors and conservatively drops an unsupported optional correction instead of failing the complete manuscript.
+- Keeps an overview and its immediate same-topic expansion in one semantic section, and preserves small progressive changes in requested PPT/whiteboard/diagram windows so a more complete later frame can win normal evidence scoring.
 
 ## 1.1.0 — deployment packaging
 
