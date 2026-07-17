@@ -104,6 +104,8 @@ The dedicated store defaults to `~/.config/video-to-detailed-manuscript/secrets.
 
 Public acquisition is preferred. Bilibili public videos need no credential; its complete Cookie header is optional. YouTube public video extraction is installed and needs no API Key; a Data API Key remains an optional metadata/API enhancement, not a universal subtitle credential. Public Zhihu pages are planned without a key, while its official Access Secret enables only the APIs actually granted. Douyin official client credentials apply only to reviewed applications and authorized scopes. The currently documented Xiaohongshu merchant/mini-app credentials are not treated as a general public-note reading API.
 
+Generic web/CSDN extraction is installed and needs no credential. It installs the Apache-2.0 `readability-lxml` body extractor and BSD-3-Clause `extruct` JSON-LD metadata parser, accepts public HTTP(S) article URLs, rejects local/private network targets, and does not bypass login, payment, JavaScript-only rendering, or risk control. A CSDN page may return HTTP 521 or reset a connection for a particular local or server exit; use another policy-compliant network path if available, rather than public proxy lists or third-party reader services.
+
 ## YouTube acquisition
 
 Public `youtube.com` and `youtu.be` video links need no API Key. The adapter canonicalizes the video ID, prefers creator-provided subtitles, then selects an original-language automatic caption track. It does not silently choose an automatic translation merely because it is Chinese. If no transcript is available, it downloads one audio stream for the prepared local ASR. Visual analysis remains capped at 720p; retained frames are remotely re-captured from the highest available stream up to the configured 1080p request.
@@ -128,7 +130,7 @@ The pipeline requests native subtitles first. When a login cookie is configured,
 
 ## Obsidian
 
-Point `--vault` at any writable Vault directory. The CLI writes user-facing notes under `Sources/Videos/YYYY/YYYY-MM`, plus master and daily indexes under `Indexes/`. Operational state never lives inside the Vault. Markdown uses relative image links, so synchronization is independent of the processing pipeline. Use Obsidian Sync, Syncthing, Git, or WebDAV according to the deployment environment.
+Point `--vault` at any writable Vault directory. The CLI writes video notes under `Sources/Videos/YYYY/YYYY-MM`, document notes under `Sources/Documents/YYYY/YYYY-MM`, and master/daily indexes under `Indexes/`. Operational state never lives inside the Vault. Markdown uses relative image links, so synchronization is independent of the processing pipeline. Use Obsidian Sync, Syncthing, Git, or WebDAV according to the deployment environment.
 
 Run `scripts/vtm cleanup` hourly if desired. Every CLI invocation also removes work directories older than 6 hours, exports older than 24 hours, and recycle-bin entries older than 30 days. Active task media is removed in `finally` on success, failure, or cancellation.
 

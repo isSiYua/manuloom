@@ -9,6 +9,10 @@
 - Adds public YouTube video support with canonical URL identity, manual/original-language subtitle priority, audio-ASR fallback, dynamic visuals, and retained-frame high-resolution seeking.
 - Generalizes task identity to `platform/source_kind/source_id/source_key` while preserving legacy BVID fields and Bilibili duplicate behavior.
 - Adds bounded source-network timeouts and an optional protected outbound proxy setting for restricted server networks.
+- Adds public generic-web/CSDN document support with ordered article blocks, headings, lists, tables, code, original-image placement, compact inspection, and no fake video timestamps.
+- Reuses Apache-2.0 `readability-lxml` for main-article selection, with a deterministic structure-fidelity fallback when upstream cleanup would drop tables, code, or original images.
+- Reuses BSD-3-Clause `extruct` for standard JSON-LD article title, author, publication time, and publisher metadata instead of adding site-specific metadata scrapers.
+- Rejects credential-bearing, non-HTTP(S), localhost, private, and reserved source URLs; bounds HTML/image response sizes and excludes navigation, comments, recommendations, and other page chrome.
 
 ## 1.1.0 — deployment packaging
 

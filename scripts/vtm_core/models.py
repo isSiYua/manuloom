@@ -10,9 +10,13 @@ class Segment:
     start: float
     end: float
     text: str
+    locator_kind: str = "time"
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.locator_kind == "time":
+            payload.pop("locator_kind")
+        return payload
 
 
 @dataclass(slots=True)
@@ -79,6 +83,16 @@ class Frame:
     information_density: str = "unknown"
     information_gain: str = "unknown"
     final_height: int | None = None
+    media_kind: str = "video_frame"
+    locator_label: str = ""
+    source_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.media_kind == "video_frame":
+            payload.pop("media_kind")
+        if not self.locator_label:
+            payload.pop("locator_label")
+        if not self.source_url:
+            payload.pop("source_url")
+        return payload

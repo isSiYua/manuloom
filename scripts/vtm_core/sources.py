@@ -100,6 +100,23 @@ class VideoSourceAdapter(SourceAdapter, Protocol):
     def folder_marker(self, inspected: Any) -> str: ...
 
 
+@runtime_checkable
+class DocumentSourceAdapter(SourceAdapter, Protocol):
+    def restore_info(self, metadata: dict[str, Any]) -> Any: ...
+
+    def metadata(self, inspected: Any) -> dict[str, Any]: ...
+
+    def content_segments(self, inspected: Any) -> tuple[list[Segment], dict[str, Any]]: ...
+
+    def download_images(
+        self, inspected: Any, assets_dir: Path, *, limit: int = 60
+    ) -> list[Frame]: ...
+
+    def context(self, inspected: Any) -> str: ...
+
+    def folder_marker(self, inspected: Any) -> str: ...
+
+
 class BilibiliSourceAdapter:
     """Compatibility adapter around the frozen Bilibili 1.0.0 client."""
 
@@ -226,8 +243,9 @@ def source_adapters() -> tuple[SourceAdapter, ...]:
     """Return installed adapters in deterministic matching order."""
 
     from .youtube import YouTubeSourceAdapter
+    from .web import GenericWebSourceAdapter
 
-    return (BilibiliSourceAdapter(), YouTubeSourceAdapter())
+    return (BilibiliSourceAdapter(), YouTubeSourceAdapter(), GenericWebSourceAdapter())
 
 
 def adapter_by_platform(platform: str) -> SourceAdapter:

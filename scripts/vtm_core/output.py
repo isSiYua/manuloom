@@ -108,6 +108,7 @@ def compose_markdown(
 ) -> None:
     note_path.parent.mkdir(parents=True, exist_ok=True)
     platform = str(metadata.get("platform") or ("bilibili" if metadata.get("bvid") else "unknown"))
+    source_kind = str(metadata.get("source_kind") or "video")
     source_id = str(metadata.get("source_id") or metadata.get("bvid") or "")
     creator = str(metadata.get("author") or metadata.get("owner") or "")
     lines = [
@@ -129,14 +130,16 @@ def compose_markdown(
                 f"source_id: {yaml_scalar(source_id)}",
             ]
         )
+    lines.append(f"creator: {yaml_scalar(creator)}")
+    if metadata.get("published_at"):
+        lines.append(f"published: {yaml_scalar(metadata.get('published_at'))}")
     lines.extend([
-        f"creator: {yaml_scalar(creator)}",
         f"task: {yaml_scalar(metadata.get('task_key'))}",
         f"created: {yaml_scalar(metadata.get('task_date'))}",
         f"status: {yaml_scalar(metadata.get('quality_status', 'complete'))}",
         f"pipeline_version: {yaml_scalar(metadata.get('pipeline_version', 'unknown'))}",
-        'type: "video-manuscript"',
-        f"tags: [video-manuscript, {platform}]",
+        f"type: {yaml_scalar('video-manuscript' if source_kind == 'video' else 'source-manuscript')}",
+        f"tags: [{('video-manuscript' if source_kind == 'video' else 'source-manuscript')}, {platform}]",
         "---",
         "",
         f"# {metadata.get('title') or source_id}",
@@ -144,7 +147,7 @@ def compose_markdown(
         (
             f"> 来源：[Bilibili]({metadata.get('url')}) · UP主：{creator or '未知'}"
             if platform == "bilibili"
-            else f"> 来源：[{platform}]({metadata.get('url')}) · 作者/频道：{creator or '未知'}"
+            else f"> 来源：[{platform}]({metadata.get('url')}) · {'作者/频道' if source_kind == 'video' else '作者'}：{creator or '未知'}"
         ),
         "",
     ])
@@ -170,24 +173,27 @@ def compose_markdown(
             # Low/medium-confidence vision descriptions are deliberately not
             # promoted to alt text: alt text is still published prose and must
             # obey the same evidence standard as a visible callout.
-            alt = (
-                frame.vision_description
-                if frame.evidence_confidence == "high"
-                and frame.evidence_completeness == "complete"
-                and frame.ocr_confidence >= 50
-                and frame.vision_description
-                and len(frame.vision_description) <= 120
-                else f"{frame.content_kind if frame.content_kind != 'other' else '视频关键画面'} {timestamp(frame.timestamp)}"
-            )
+            if frame.media_kind == "source_image":
+                # A document-order locator is not a video timestamp.  Preserve
+                # useful source alt text when available, otherwise use the
+                # original-image label assigned by the document adapter.
+                alt = frame.vision_description or frame.locator_label or "原文图片"
+            else:
+                alt = (
+                    frame.vision_description
+                    if frame.evidence_confidence == "high"
+                    and frame.evidence_completeness == "complete"
+                    and frame.ocr_confidence >= 50
+                    and frame.vision_description
+                    and len(frame.vision_description) <= 120
+                    else f"{frame.content_kind if frame.content_kind != 'other' else '视频关键画面'} {timestamp(frame.timestamp)}"
+                )
             alt = alt.replace("[", "").replace("]", "")[:160]
-            lines.extend(
-                [
-                    f"![{alt}]({relative})",
-                    "",
-                    f"*画面时间：{timestamp(frame.timestamp)}*",
-                    "",
-                ]
-            )
+            lines.extend([f"![{alt}]({relative})", ""])
+            if frame.media_kind == "source_image":
+                lines.extend([f"*{frame.locator_label or '原文图片'}*", ""])
+            else:
+                lines.extend([f"*画面时间：{timestamp(frame.timestamp)}*", ""])
     planned_ids = {id(frame) for group in frame_plan.values() for frame in group}
     for frame in frames:
         if id(frame) in planned_ids and frame.keep_image:
@@ -217,16 +223,18 @@ def update_indexes(vault: Path, note_path: Path, metadata: dict[str, Any]) -> No
     target = note_path.relative_to(vault).with_suffix("").as_posix()
     entry = f"- [[{target}|{title}]] · `{task_key}` · {creator}"
     with _index_lock(vault):
-        master = vault / "Indexes" / "视频资料库.md"
+        is_video = str(metadata.get("source_kind") or "video") == "video"
+        master = vault / "Indexes" / ("视频资料库.md" if is_video else "来源资料库.md")
         daily = vault / "Indexes" / "Daily" / f"{day}.md"
         daily.parent.mkdir(parents=True, exist_ok=True)
         if not master.exists():
-            master.write_text("# 视频资料库\n\n", encoding="utf-8")
+            master.write_text("# 视频资料库\n\n" if is_video else "# 来源资料库\n\n", encoding="utf-8")
         if entry not in master.read_text(encoding="utf-8"):
             with master.open("a", encoding="utf-8") as handle:
                 handle.write(entry + "\n")
         if not daily.exists():
-            daily.write_text(f"# {day} 视频笔记\n\n", encoding="utf-8")
+            daily_kind = "视频笔记" if is_video else "来源笔记"
+            daily.write_text(f"# {day} {daily_kind}\n\n", encoding="utf-8")
         if entry not in daily.read_text(encoding="utf-8"):
             with daily.open("a", encoding="utf-8") as handle:
                 handle.write(entry + "\n")

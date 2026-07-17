@@ -1,1 +1,3 @@
 yt-dlp>=2026.6.0
+readability-lxml>=0.8.4.1,<0.9
+extruct>=0.18,<0.19

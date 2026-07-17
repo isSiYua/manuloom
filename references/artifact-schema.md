@@ -15,6 +15,17 @@ User-facing Vault content:
 
 YouTube videos use the same layout with a `[YT-video_id]` folder marker. Source-neutral task metadata records `platform`, `source_kind`, `source_id`, and `source_key`; legacy `bvid` and `part` remain for Bilibili compatibility.
 
+Public documents use a parallel layout:
+
+```text
+<vault>/Sources/Documents/YYYY/YYYY-MM/YYYYMMDD-N-title [WEB-source_id]/
+├── title.md
+└── assets/
+    └── source-001.png
+
+<vault>/Indexes/来源资料库.md
+```
+
 Operational content outside the Vault:
 
 ```text
@@ -35,7 +46,7 @@ Operational content outside the Vault:
 └── trash/YYYYMMDD-N/      # soft-deleted notes; 30-day retention
 ```
 
-`raw-transcript.json` contains ordered `{id,start,end,text}` segments. Segments must pass monotonic-time and maximum-size gates.
+`raw-transcript.json` contains ordered `{id,start,end,text}` segments for the legacy video schema; an omitted `locator_kind` means `time`, preserving existing Bilibili and YouTube artifacts. Document segments additionally store `locator_kind: document_order`; their numeric axis is only an internal deterministic ordering mechanism and is never published as a video timestamp.
 
 `information-units.json` is the complete evidence-accounting layer. Every source ID appears in exactly one chronological unit. Kept units contain normalized meaning, concrete details, and high-confidence exact anchors. Dropped units require one legal reason: filler, false start, promotional request, or true repetition.
 
@@ -48,6 +59,8 @@ Operational content outside the Vault:
 Developer-only `vtm evaluate` writes `manuscript-preview.md`, `clean-transcript.json`, `coverage.json`, and a reusable checkpoint under `<source>/evaluations/<pipeline-version>/` by default. This path is not a task, Vault note, index entry, or downloadable artifact.
 
 `visual-manifest.json` contains every reviewed frame with timestamp, nearby source IDs, OCR text, optional vision description, perceptual hash, quality metrics, `content_kind`, `extracted_markdown`, `evidence_confidence`, `evidence_completeness`, `information_density`, `keep_image`, and the actual `final_height` when a retained screenshot is replaced from the final stream. Text-replaceable frames have an empty final path only after complete coverage is proven; visually indispensable or information-dense frames retain a relative asset path.
+
+For document sources, the same manifest stores `media_kind: source_image`, `locator_label`, and the public `source_url`. Original images are aligned to the paragraph that owns their preceding source block and render with an original-order label rather than `画面时间`.
 
 Asset filenames use only the task key, sequence number, and timestamp. Descriptive Chinese text belongs in Markdown alt text rather than filesystem names. Missing or empty candidate captures are omitted without failing the note.
 

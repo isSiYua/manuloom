@@ -1,11 +1,11 @@
 ---
 name: video-to-detailed-manuscript
-description: "Convert public Bilibili, b23.tv, BV, av, YouTube, or youtu.be video links into detailed illustrated Obsidian manuscripts and manage server-side results through natural Chinese. Always use for a supported video link or requests such as '提取这个视频', '任务列表', '所有笔记列表', '下载 1', 'download 1', '下载 20260716-1', '删除 1', '确认删除 1', '恢复 20260716-1', '终止任务', '协议自检', or '暂存'. Produce an edited full-content note rather than a summary or verbatim dump: preserve every useful explanation, example, step, command, datum, qualifier, name, and caveat; remove fillers and genuine repetition; place useful frames beside the matching passage. Also use to list, package, send, soft-delete, restore, cancel, self-check, or inspect existing video-note tasks."
+description: "Convert public Bilibili/YouTube videos and public generic-web/CSDN articles into detailed illustrated Obsidian manuscripts, then manage server-side results through natural Chinese. Always use for a supported source link or requests such as '提取这个视频', '提取这篇文章', '任务列表', '下载 1', '删除 1', '恢复 20260716-1', '终止任务', '协议自检', or '配置平台'. Produce an edited full-content note rather than a summary, verbatim transcript, or raw page copy: preserve every useful explanation, example, step, command, datum, qualifier, name, and caveat; remove fillers, page chrome, and genuine repetition; place useful video frames or original article images beside the matching passage. Also use to list, package, send, soft-delete, restore, cancel, self-check, configure, or inspect existing source-note tasks."
 ---
 
 # Create and manage detailed video manuscripts
 
-Use the bundled CLI as the only execution path. Resolve the directory containing this `SKILL.md` once and invoke the executable `scripts/vtm` launcher by its absolute path; never assume the Agent's current working directory is the Skill directory. Treat a supported Bilibili or YouTube URL by itself as a complete extraction request. Do not ask the user to repeat output requirements or remember commands.
+Use the bundled CLI as the only execution path. Resolve the directory containing this `SKILL.md` once and invoke the executable `scripts/vtm` launcher by its absolute path; never assume the Agent's current working directory is the Skill directory. Treat a supported Bilibili, YouTube, or public generic-web/CSDN URL by itself as a complete extraction request. Do not ask the user to repeat output requirements or remember commands.
 
 ## Output contract
 
@@ -54,8 +54,8 @@ For development and regression work, use `scripts/vtm evaluate --source-dir <tas
 
 Hide tools, commands, searches, dependency checks, credentials, and raw logs. Send only stage changes emitted by the CLI:
 
-1. `正在读取视频信息。`
-2. `正在获取或识别字幕。`
+1. `正在读取视频信息。` or `正在读取来源信息。`
+2. `正在获取或识别字幕。` or `正在获取完整文字证据。`
 3. `正在清理和重排完整文字稿。`
 4. `正在提取并匹配关键画面。`
 5. `正在生成 Obsidian 文稿。`
@@ -220,9 +220,10 @@ Use the bounded built-in chain:
 
 1. For Bilibili, prefer native/manual or ordinary AI subtitle tracks; this downloads no audio. With an optional login cookie, next try Bilibili's timestamped AI-conclusion transcript.
 2. For YouTube, prefer a creator-provided subtitle track, then an original-language automatic caption track. Do not silently choose an auto-translated track merely because it matches the manuscript language.
-3. If the selected platform exposes no transcript, download one audio stream and run the preloaded local ASR.
-4. Use yt-dlp only after the direct player stream fails.
-5. Use at most a 720p video-only stream for scene detection, OCR prefiltering, deduplication, and frame selection. A dedicated DeepSeek visual planner reads the complete timestamped transcript plus the approved article plan and decides which time ranges need visual evidence without modifying the prose plan. Inside those ranges, treat every locally distinct scene/slide change as a candidate rather than sampling once per minute. Paid vision review is therefore dynamic: a slide-dense technical video may use many frames while a visually sparse conversation may use none. The default candidate and paid-vision safety ceiling is 60, configurable with `--max-frames` and `VTM_MAX_VISION_FRAMES`; it is a hard cost ceiling, not a target. Preserve multiple distinct visual items for one paragraph when they carry different information, and remove adjacent near-duplicates. After deciding which images must remain, seek only those timestamps from the highest available stream up to 1080p and replace the analysis frames. Record the actual returned height; never claim 1080p when the platform only exposes a lower stream. Extract complete simple text/list/table/code/formula evidence into copyable Markdown/LaTeX first and remove its frame only after completeness is proven. Keep diagrams, architecture/process charts, paper figures, complex UI, partial OCR, dense prompts, and any visually irreplaceable evidence immediately after the matching passage.
+3. For generic public web/CSDN documents, extract the ordered main-article blocks and original images directly. Exclude navigation, comments, recommendations, login panels, and page chrome. Never display the internal document-order axis as a video timestamp. If a page requires login, payment, JavaScript rendering, or returns risk-control/HTTP 521, report the limitation; do not route content through a public proxy or third-party reader.
+4. If a selected video platform exposes no transcript, download one audio stream and run the preloaded local ASR.
+5. Use yt-dlp only after the direct player stream fails.
+6. Use at most a 720p video-only stream for scene detection, OCR prefiltering, deduplication, and frame selection. A dedicated DeepSeek visual planner reads the complete timestamped transcript plus the approved article plan and decides which time ranges need visual evidence without modifying the prose plan. Inside those ranges, treat every locally distinct scene/slide change as a candidate rather than sampling once per minute. Paid vision review is therefore dynamic: its base budget starts at 6 and increases with video duration and subtitle-grounded requests, with a hard upper bound of 60 controlled by `--max-frames` and `VTM_MAX_VISION_FRAMES`. Six is not a required retained-image count: a visually sparse conversation may keep none, while a slide-dense technical video may use more. Preserve multiple distinct visual items for one paragraph when they carry different information, and remove adjacent near-duplicates. After deciding which images must remain, seek only those timestamps from the highest available stream up to 1080p and replace the analysis frames. Record the actual returned height; never claim 1080p when the platform only exposes a lower stream. Extract complete simple text/list/table/code/formula evidence into copyable Markdown/LaTeX first and remove its frame only after completeness is proven. Keep diagrams, architecture/process charts, paper figures, complex UI, partial OCR, dense prompts, and any visually irreplaceable evidence immediately after the matching passage.
 
 Discard decorative or zero-information-gain frames even when they are temporally aligned: presenter avatars, stock/cartoon illustrations, watermarks, repeated subtitles/titles, simple labels with decorative icons, and a single arrow whose full meaning is already present in prose. A verbose vision description alone never makes a simple screen “dense.” Classification failure still keeps the aligned original conservatively.
 
@@ -244,7 +245,11 @@ User-facing notes:
 ObsidianVault/Sources/Videos/YYYY/YYYY-MM/YYYYMMDD-N-title [BV]/
   title.md
   assets/
+ObsidianVault/Sources/Documents/YYYY/YYYY-MM/YYYYMMDD-N-title [WEB-source]/
+  title.md
+  assets/
 ObsidianVault/Indexes/视频资料库.md
+ObsidianVault/Indexes/来源资料库.md
 ObsidianVault/Indexes/Daily/YYYY-MM-DD.md
 ```
 

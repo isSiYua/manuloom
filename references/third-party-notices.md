@@ -16,3 +16,7 @@ Redistribution of adapted MIT-licensed portions is permitted subject to preserva
 Full notices for source-derived code are preserved in [licenses/BiliNote-MIT.txt](licenses/BiliNote-MIT.txt) and [licenses/summarize-MIT.txt](licenses/summarize-MIT.txt).
 
 VideoLingo (Apache-2.0) was studied for its faithfulness-then-expressiveness workflow and neighbouring-context pattern. No VideoLingo source code is redistributed in this Skill; the independent implementation applies the architectural idea to manuscript editing. https://github.com/Huanshere/VideoLingo
+
+readability-lxml (Apache-2.0) is an external Python dependency used to select and clean the main body of public web articles while retaining article images. The Skill adds its own bounded downloader, SSRF protections, ordered evidence conversion, image placement, and release gates; readability-lxml is not copied into this repository. https://github.com/buriy/python-readability
+
+extruct (BSD-3-Clause) is an external Python dependency used to read standard embedded JSON-LD article metadata such as title, author, publication date, and publisher. Platform-specific selectors remain a fallback rather than replacing this maintained structured-data parser. https://github.com/scrapinghub/extruct

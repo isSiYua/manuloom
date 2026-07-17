@@ -33,7 +33,7 @@ from vtm_core.configuration import (  # noqa: E402
     secret_store_path,
     set_secret_interactive,
 )
-from vtm_core.sources import adapter_for  # noqa: E402
+from vtm_core.sources import DocumentSourceAdapter, adapter_for  # noqa: E402
 from vtm_core.pipeline import Options, run  # noqa: E402
 from vtm_core.output import remove_index_entries, update_indexes  # noqa: E402
 from vtm_core.direct_manuscript import create_direct_manuscript  # noqa: E402
@@ -118,7 +118,9 @@ def duplicate_skill_paths() -> list[str]:
 
 _PROGRESS_STAGES = {
     "正在读取视频信息。": 1,
+    "正在读取来源信息。": 1,
     "正在获取或识别字幕。": 2,
+    "正在获取完整文字证据。": 2,
     "正在清理和重排完整文字稿。": 3,
     "正在提取并匹配关键画面。": 4,
     "正在生成 Obsidian 文稿。": 5,
@@ -141,10 +143,11 @@ def format_gateway_completion(label: str, result: dict[str, object]) -> str:
         frame_count = int(str(result.get("frames") or 0))
     except ValueError:
         frame_count = 0
+    is_video = str(result.get("source_kind") or "video") == "video"
     return (
         f"[{label}] [6/6] {status} 标题：{title}；"
-        f"字幕来源：{result.get('transcript_source') or '未知'}；"
-        f"保留画面：{frame_count}；"
+        f"{'字幕来源' if is_video else '文字来源'}：{result.get('transcript_source') or '未知'}；"
+        f"{'保留画面' if is_video else '保留原图'}：{frame_count}；"
         f"Markdown：{result.get('note')}。"
         f"任务已暂存服务器，需要时说“下载 {result.get('id')}”。"
     )
@@ -789,7 +792,7 @@ def parser() -> argparse.ArgumentParser:
     run_options.add_argument("--visual-height", type=int, default=int(os.getenv("VTM_VISUAL_HEIGHT", "720")))
     run_options.add_argument("--final-visual-height", type=int, default=int(os.getenv("VTM_FINAL_VISUAL_HEIGHT", "1080")))
     run_options.add_argument("--resume", type=Path)
-    run_options.add_argument("--force", action="store_true", help="regenerate even when the same video part already exists")
+    run_options.add_argument("--force", action="store_true", help="regenerate even when the same source already exists")
     run_options.add_argument("--no-progress", action="store_true")
     run_options.add_argument(
         "--gateway-output",
@@ -801,7 +804,7 @@ def parser() -> argparse.ArgumentParser:
         default=os.getenv("VTM_PROGRESS_TARGET", ""),
         help="optional Hermes send target such as feishu or feishu:chat_id",
     )
-    commands.add_parser("run", parents=[run_options], help="process a video")
+    commands.add_parser("run", parents=[run_options], help="process a supported source")
     commands.add_parser(
         "submit",
         parents=[run_options],
@@ -941,6 +944,8 @@ def contract() -> dict[str, object]:
         },
         "source_id_audit": {
             "every_source_assigned_to_one_chronological_paragraph": True,
+            "document_blocks_assigned_in_original_order": True,
+            "document_order_is_not_published_as_video_time": True,
             "model_copies_individual_ids": False,
             "model_output_fields": ["start_source_id"],
             "assignment_method": "deterministic_paragraph_start_ranges",
@@ -998,11 +1003,19 @@ def contract() -> dict[str, object]:
             "bilibili_behavior_preserved_behind_adapter": True,
             "future_sources_fork_manuscript_core": False,
             "installed_video_platforms": ["bilibili", "youtube"],
+            "installed_document_platforms": ["generic_web"],
             "youtube_public_mode_requires_api_key": False,
             "youtube_manual_subtitle_precedes_automatic": True,
             "youtube_automatic_caption_prefers_original_language": True,
             "youtube_missing_subtitle_uses_one_audio_stream_asr": True,
             "source_network_requests_have_bounded_timeouts": True,
+            "generic_web_public_http_only": True,
+            "generic_web_private_network_requests_rejected": True,
+            "generic_web_navigation_comments_recommendations_excluded": True,
+            "generic_web_preserves_headings_lists_tables_code_and_original_images": True,
+            "generic_web_primary_extractor": "readability-lxml",
+            "generic_web_structured_metadata_parser": "extruct",
+            "generic_web_structured_fidelity_fallback": True,
             "optional_source_proxy_is_allowlisted_secret": True,
             "order": [
                 "native_or_ai_subtitle",
@@ -1044,6 +1057,8 @@ def contract() -> dict[str, object]:
             "asr_suspect_visual_endpoints_prioritized_within_same_budget": True,
             "vision_description_length_alone_does_not_force_image_retention": True,
             "images_follow_matching_passage": True,
+            "document_original_images_follow_preceding_content_block": True,
+            "document_original_images_have_no_fake_video_timestamp": True,
             "image_gallery_before_manuscript": False,
             "screen_only_facts_use_callout": "画面补充",
             "vision_provider_openai_compatible_and_swappable": True,
@@ -1201,9 +1216,17 @@ def main() -> int:
             adapter = adapter_for(args.url)
             canonical = adapter.canonicalize_input(args.url)
             info = adapter.inspect(canonical, args.part)
-            segments, transcript_meta = adapter.primary_transcript(info)
+            if isinstance(adapter, DocumentSourceAdapter):
+                segments, transcript_meta = adapter.content_segments(info)
+            else:
+                segments, transcript_meta = adapter.primary_transcript(info)
+            inspected_metadata = adapter.metadata(info)
+            if isinstance(adapter, DocumentSourceAdapter):
+                inspected_metadata.pop("segments", None)
+                inspected_metadata.pop("images", None)
+                inspected_metadata["image_count"] = int(transcript_meta.get("image_count") or 0)
             result = {
-                "metadata": adapter.metadata(info),
+                "metadata": inspected_metadata,
                 "source_segments": len(segments),
                 "transcript": transcript_meta,
             }
@@ -1250,7 +1273,7 @@ def main() -> int:
                 if found:
                     failure = f" 上次失败原因：{found.get('error')}" if found.get("status") == "failed" else ""
                     raise RuntimeError(
-                        f"该视频已存在：{found['task_key']}（{found['title']}，状态 {found['status']}）。"
+                        f"该来源已存在：{found['task_key']}（{found['title']}，状态 {found['status']}）。"
                         f"{failure} 不要自动重试；如需重新生成，必须由用户明确提出，再使用 --force。"
                     )
             task = reserve_task(

@@ -11,6 +11,7 @@ from . import PIPELINE_VERSION
 from .bilibili import BilibiliClient
 from .sources import (
     BilibiliSourceAdapter,
+    DocumentSourceAdapter,
     VideoSourceAdapter,
     adapter_by_platform,
     adapter_for,
@@ -35,6 +36,56 @@ from .tasks import state_root
 from .transcript import enrich_with_visual_evidence
 from .utils import atomic_json, load_json, safe_name
 from .visual import extract_useful_frames
+
+
+class _DocumentEditingClient:
+    """Use the frozen semantic passes with document-appropriate evidence wording."""
+
+    _replacements = (
+        ("完整带时间戳字幕", "按原文顺序排列的完整内容块"),
+        ("带时间戳字幕", "按原文顺序排列的内容块"),
+        ("视频详细文字稿", "来源详细编辑稿"),
+        ("视频文字稿", "来源详细编辑稿"),
+        ("原字幕", "原文内容块"),
+        ("字幕", "内容块"),
+        ("视频事实", "来源事实"),
+        ("视频原始顺序", "原文顺序"),
+        ("视频中的", "原文中的"),
+        ("视频内容", "原文内容"),
+        ("视频", "来源文章"),
+        ("画面独有", "原图独有"),
+        ("画面", "原图"),
+    )
+
+    def __init__(self, client: Any):
+        self.client = client
+
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+        adapted: list[dict[str, Any]] = []
+        for message in messages:
+            item = dict(message)
+            content = item.get("content")
+            if item.get("role") == "system" and isinstance(content, str):
+                for source, replacement in self._replacements:
+                    content = content.replace(source, replacement)
+                item["content"] = content
+            adapted.append(item)
+        return self.client.chat(adapted, **kwargs)
+
+
+def _align_document_images(paragraphs: list[Any], frames: list[Frame]) -> None:
+    """Attach each source image to the paragraph owning its preceding content block."""
+
+    by_source: dict[str, int] = {}
+    for index, paragraph in enumerate(paragraphs):
+        for source_id in paragraph.source_ids:
+            by_source[source_id] = index
+    last_index = 0
+    for frame in sorted(frames, key=lambda item: item.timestamp):
+        matches = [by_source[source_id] for source_id in frame.source_ids if source_id in by_source]
+        if matches:
+            last_index = matches[-1]
+        frame.paragraph_index = min(last_index, max(0, len(paragraphs) - 1)) if paragraphs else None
 
 
 @dataclass(slots=True)
@@ -89,7 +140,6 @@ def run(options: Options) -> dict[str, Any]:
             free = shutil.disk_usage(storage).free
             if free < 5 * 1024**3:
                 raise RuntimeError("服务器可用磁盘不足 5GB，已拒绝新任务以避免写满磁盘")
-        _progress(options, "正在读取视频信息。")
         if options.resume:
             metadata = load_json(options.resume.resolve() / "metadata.json")
             if not metadata:
@@ -98,8 +148,8 @@ def run(options: Options) -> dict[str, Any]:
             adapter = adapter_by_platform(platform)
             if platform == "bilibili":
                 adapter = BilibiliSourceAdapter(BilibiliClient())
-            if not isinstance(adapter, VideoSourceAdapter):
-                raise RuntimeError(f"{platform} 不是视频来源适配器")
+            if not isinstance(adapter, (VideoSourceAdapter, DocumentSourceAdapter)):
+                raise RuntimeError(f"{platform} 不是已安装的来源适配器")
             info = adapter.restore_info(metadata)
         else:
             detected = adapter_for(options.url)
@@ -108,14 +158,20 @@ def run(options: Options) -> dict[str, Any]:
                 if detected.platform == "bilibili"
                 else detected
             )
-            if not isinstance(adapter, VideoSourceAdapter):
-                raise RuntimeError(f"{adapter.platform} 不是视频来源适配器")
+            if not isinstance(adapter, (VideoSourceAdapter, DocumentSourceAdapter)):
+                raise RuntimeError(f"{adapter.platform} 不是已安装的来源适配器")
             info = adapter.inspect(options.url, options.part)
+        is_video = isinstance(adapter, VideoSourceAdapter)
+        is_document = isinstance(adapter, DocumentSourceAdapter)
+        if is_video == is_document:
+            raise RuntimeError("来源适配器能力声明无效")
+        _progress(options, "正在读取视频信息。" if is_video else "正在读取来源信息。")
         reference = adapter.reference(info)
         full_title = reference.title
         folder = safe_name(f"{options.task_key}-{full_title} [{adapter.folder_marker(info)}]")
         year, month = options.task_date[:4], options.task_date[:7]
-        job_dir = vault_root / "Sources" / "Videos" / year / month / folder
+        collection = "Videos" if is_video else "Documents"
+        job_dir = vault_root / "Sources" / collection / year / month / folder
         assets_dir = job_dir / "assets"
         assets_dir.mkdir(parents=True, exist_ok=True)
         metadata = adapter.metadata(info)
@@ -129,7 +185,7 @@ def run(options: Options) -> dict[str, Any]:
         atomic_json(source_dir / "metadata.json", metadata)
         atomic_json(job_path, {"status": "running", "stage": "transcript", "warnings": []})
 
-        _progress(options, "正在获取或识别字幕。")
+        _progress(options, "正在获取或识别字幕。" if is_video else "正在获取完整文字证据。")
         raw_path = source_dir / "raw-transcript.json"
         raw = load_json(raw_path)
         if not raw and options.resume:
@@ -140,20 +196,25 @@ def run(options: Options) -> dict[str, Any]:
             segments = _segments_from_artifact(raw)
             transcript_meta = raw.get("metadata") or {"source": "resumed"}
         else:
-            segments, transcript_meta = adapter.primary_transcript(info)
-            if not segments:
-                segments, transcript_meta = adapter.secondary_transcript(info)
-            if not segments:
-                audio_path = adapter.download_audio(
-                    info, work_dir, cookies_file=options.cookies_file
-                )
-                segments, transcript_meta = transcribe(audio_path, options.asr_model, backend=options.asr_backend)
-            segments = normalize_segments(segments, reference.duration or 0)
+            if is_video:
+                segments, transcript_meta = adapter.primary_transcript(info)
+                if not segments:
+                    segments, transcript_meta = adapter.secondary_transcript(info)
+                if not segments:
+                    audio_path = adapter.download_audio(
+                        info, work_dir, cookies_file=options.cookies_file
+                    )
+                    segments, transcript_meta = transcribe(audio_path, options.asr_model, backend=options.asr_backend)
+                segments = normalize_segments(segments, reference.duration or 0)
+            else:
+                segments, transcript_meta = adapter.content_segments(info)
             atomic_json(raw_path, {"metadata": transcript_meta, "segments": [segment.to_dict() for segment in segments]})
 
         _progress(options, "正在清理和重排完整文字稿。")
         atomic_json(job_path, {"status": "running", "stage": "semantic_edit", "warnings": []})
         llm = text_client(options.llm_model)
+        if is_document and llm is not None:
+            llm = _DocumentEditingClient(llm)
         checkpoint_path = source_dir / "manuscript-checkpoint.json"
         _resume_checkpoint(options.resume, checkpoint_path)
         plan = create_direct_plan(
@@ -168,33 +229,42 @@ def run(options: Options) -> dict[str, Any]:
         _progress(options, "正在提取并匹配关键画面。")
         if not options.no_visual:
             atomic_json(job_path, {"status": "running", "stage": "visual", "warnings": []})
-            outline_requests = visual_requests_from_plan(plan, segments)
-            visual_plan_warning = ""
-            try:
-                dedicated_requests = create_visual_request_plan(segments, llm, plan)
-            except Exception as exc:
-                dedicated_requests = []
-                visual_plan_warning = f"独立视觉范围规划失败，使用文章大纲请求（{type(exc).__name__}）"
-            visual_requests = merge_visual_requests(outline_requests, dedicated_requests)
-            video_path = adapter.download_analysis_video(
-                info,
-                work_dir,
-                cookies_file=options.cookies_file,
-                max_height=options.visual_height,
-            )
-            frames, extracted_visual_meta = extract_useful_frames(
-                video_path,
-                assets_dir,
-                segments,
-                max_frames=options.max_frames,
-                visual_requests=visual_requests,
-                task_key=options.task_key,
-            )
-            visual_meta.update(extracted_visual_meta)
-            visual_meta["outline_visual_request_count"] = len(outline_requests)
-            visual_meta["dedicated_visual_request_count"] = len(dedicated_requests)
-            if visual_plan_warning:
-                visual_meta["visual_planner_warning"] = visual_plan_warning
+            if is_video:
+                outline_requests = visual_requests_from_plan(plan, segments)
+                visual_plan_warning = ""
+                try:
+                    dedicated_requests = create_visual_request_plan(segments, llm, plan)
+                except Exception as exc:
+                    dedicated_requests = []
+                    visual_plan_warning = f"独立视觉范围规划失败，使用文章大纲请求（{type(exc).__name__}）"
+                visual_requests = merge_visual_requests(outline_requests, dedicated_requests)
+                video_path = adapter.download_analysis_video(
+                    info,
+                    work_dir,
+                    cookies_file=options.cookies_file,
+                    max_height=options.visual_height,
+                )
+                frames, extracted_visual_meta = extract_useful_frames(
+                    video_path,
+                    assets_dir,
+                    segments,
+                    max_frames=options.max_frames,
+                    visual_requests=visual_requests,
+                    task_key=options.task_key,
+                )
+                visual_meta.update(extracted_visual_meta)
+                visual_meta["outline_visual_request_count"] = len(outline_requests)
+                visual_meta["dedicated_visual_request_count"] = len(dedicated_requests)
+                if visual_plan_warning:
+                    visual_meta["visual_planner_warning"] = visual_plan_warning
+            else:
+                frames = adapter.download_images(info, assets_dir, limit=options.max_frames)
+                visual_meta.update(
+                    source="original_document_images",
+                    discovered_image_count=len(getattr(info, "images", ())),
+                    retained_image_count=len(frames),
+                    placement="preceding_content_block",
+                )
 
         paragraphs, coverage = complete_direct_manuscript(
             segments,
@@ -207,7 +277,7 @@ def run(options: Options) -> dict[str, Any]:
         if coverage.get("missing_ids"):
             raise RuntimeError("文字稿覆盖审计失败，未生成完成状态")
 
-        if frames:
+        if frames and is_video:
             visual_warnings = enrich_with_visual_evidence(paragraphs, frames, llm)
             try:
                 planned = plan_frame_evidence_groups(paragraphs, frames)
@@ -234,6 +304,12 @@ def run(options: Options) -> dict[str, Any]:
             # Uncertain OCR is never promoted to copyable text: the original
             # frame is retained instead, so it does not downgrade an otherwise
             # faithful manuscript.
+        elif frames:
+            _align_document_images(paragraphs, frames)
+            visual_meta["final_frame_upgrade"] = {
+                "not_applicable": True,
+                "reason": "文档来源保留原始图片，不执行视频高清取帧",
+            }
 
         _progress(options, "正在生成 Obsidian 文稿。")
         quality_status = str(coverage.get("quality_status") or "failed")

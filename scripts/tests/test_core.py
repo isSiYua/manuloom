@@ -43,7 +43,7 @@ from vtm_core.direct_manuscript import (
     visual_requests_from_plan,
 )
 from vtm_core.models import Frame, InformationUnit, OutlineSection, Paragraph, Segment
-from vtm_core.sources import BilibiliSourceAdapter, SourceAdapter, adapter_for
+from vtm_core.sources import BilibiliSourceAdapter, SourceAdapter, SourceReference, adapter_for
 from vtm_core.manuscript import (
     _adjudicate_final_audit,
     _anchor_supported as manuscript_anchor_supported,
@@ -54,8 +54,8 @@ from vtm_core.manuscript import (
     create_manuscript,
     manuscript_quality_report,
 )
-from vtm_core.output import compose_markdown, plan_frame_evidence, plan_frame_evidence_groups
-from vtm_core.pipeline import Options, _resume_checkpoint, run
+from vtm_core.output import compose_markdown, plan_frame_evidence, plan_frame_evidence_groups, update_indexes
+from vtm_core.pipeline import Options, _DocumentEditingClient, _align_document_images, _resume_checkpoint, run
 from vtm_core.bilibili import VideoInfo
 from vtm_core.transcript import (
     BATCH_EDIT_MAX_ATTEMPTS,
@@ -101,6 +101,14 @@ from vtm_core.youtube import (
     YouTubeVideoInfo,
     parse_youtube_json3,
     parse_youtube_vtt,
+)
+from vtm_core.web import (
+    GenericWebInfo,
+    GenericWebSourceAdapter,
+    _structured_article_metadata,
+    canonicalize_web_url,
+    parse_html_document,
+    validate_public_url,
 )
 from video_manuscript import (
     bundle_job,
@@ -2046,8 +2054,9 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reference.source_key, "bilibili:BV1ab411c7DE:p2")
         self.assertEqual(reference.title, "主标题 - 第二部分")
         self.assertEqual(reference.author, "作者")
-        with self.assertRaises(ValueError):
-            adapter_for("https://example.com/article")
+        self.assertIsInstance(
+            adapter_for("https://example.com/article"), GenericWebSourceAdapter
+        )
 
     def test_youtube_adapter_normalizes_supported_public_urls(self):
         client = YouTubeClient()
@@ -4549,6 +4558,374 @@ class CoreTests(unittest.TestCase):
             self.assertTrue(get_task(vault, remove_two["task_key"], include_deleted=True)["deleted_at"])
             self.assertIn("[RUNNING]", messages[0][1])
             self.assertIn("[COMPLETE]", messages[-1][1])
+
+    def test_generic_web_parser_preserves_ordered_article_text_images_and_tables(self):
+        source = """
+        <html><head>
+          <title>错误后备标题</title>
+          <meta property="og:title" content="公开文章标题">
+          <meta property="og:site_name" content="测试站点">
+        </head><body>
+          <span class="author-name">测试作者</span>
+          <span class="publish-time">2026-07-17 发布</span>
+          <nav>导航与登录入口不应进入正文。</nav>
+          <article id="content_views" class="article_content">
+            <h2>安装步骤</h2>
+            <p>先下载工具，再打开设置页面并启用对应选项。这一段包含足够长度的公开正文内容。</p>
+            <img src="/images/step.png" alt="设置页面截图" width="800" height="500">
+            <table><tr><th>字段</th><th>含义</th></tr><tr><td>mode</td><td>运行模式</td></tr></table>
+            <p>最后检查输出字段，并确认任务状态显示完成；失败时应核对网络权限和输入地址。</p>
+          </article>
+          <div class="comment-list">评论区内容不能混入文章。</div>
+        </body></html>
+        """
+        metadata, segments, images = parse_html_document(source, "https://blog.example.com/post/1")
+        rendered = "\n".join(segment.text for segment in segments)
+        self.assertEqual(metadata["title"], "公开文章标题")
+        self.assertEqual(metadata["author"], "测试作者")
+        self.assertEqual(metadata["published_at"], "2026-07-17")
+        self.assertIn(
+            metadata["extraction_engine"],
+            {
+                "readability-lxml",
+                "readability-lxml+structured-fidelity",
+                "deterministic_html_fallback",
+            },
+        )
+        self.assertIn("## 安装步骤", rendered)
+        self.assertIn("| 字段 | 含义 |", rendered)
+        self.assertNotIn("导航与登录", rendered)
+        self.assertNotIn("评论区内容", rendered)
+        self.assertTrue(all(segment.locator_kind == "document_order" for segment in segments))
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].url, "https://blog.example.com/images/step.png")
+        self.assertIn(images[0].after_segment_id, {segment.id for segment in segments})
+
+    def test_generic_web_url_policy_removes_tracking_and_blocks_private_networks(self):
+        canonical = canonicalize_web_url(
+            "HTTPS://Example.COM/post?id=7&utm_source=chat#section",
+            resolve_dns=False,
+        )
+        self.assertEqual(canonical, "https://example.com/post?id=7")
+        self.assertFalse(GenericWebSourceAdapter().can_handle("BV1ab411c7DE"))
+        self.assertFalse(GenericWebSourceAdapter().can_handle("BaW_jenozKc"))
+        for url in (
+            "http://127.0.0.1/private",
+            "http://10.0.0.8/private",
+            "http://localhost/private",
+            "file:///etc/passwd",
+            "https://user:password@example.com/private",
+        ):
+            with self.assertRaises(ValueError):
+                validate_public_url(url, resolve_dns=False)
+
+    def test_generic_web_reuses_standard_jsonld_metadata(self):
+        class FakeExtruct:
+            @staticmethod
+            def extract(raw_html, **kwargs):
+                return {
+                    "json-ld": [
+                        {
+                            "@type": "BlogPosting",
+                            "headline": "结构化标题",
+                            "author": [{"name": "作者甲"}, {"name": "作者乙"}],
+                            "datePublished": "2026-07-17T10:30:00+08:00",
+                            "publisher": {"name": "结构化站点"},
+                        }
+                    ]
+                }
+
+        with patch("vtm_core.web.extruct", FakeExtruct):
+            metadata = _structured_article_metadata("<html></html>", "https://example.com")
+        self.assertEqual(metadata["title"], "结构化标题")
+        self.assertEqual(metadata["author"], "作者甲, 作者乙")
+        self.assertEqual(metadata["published_at"], "2026-07-17T10:30:00+08:00")
+        self.assertEqual(metadata["site_name"], "结构化站点")
+
+    def test_document_prompt_adapter_removes_video_timestamp_framing(self):
+        captured = []
+
+        class Delegate:
+            def chat(self, messages, **kwargs):
+                captured.extend(messages)
+                return "{}"
+
+        client = _DocumentEditingClient(Delegate())
+        client.chat(
+            [{"role": "system", "content": "阅读完整带时间戳字幕，生成视频详细文字稿并核对画面。"}],
+            json_mode=True,
+        )
+        prompt = str(captured[0]["content"])
+        self.assertIn("按原文顺序排列的完整内容块", prompt)
+        self.assertIn("来源详细编辑稿", prompt)
+        self.assertNotIn("时间戳字幕", prompt)
+        self.assertNotIn("视频详细文字稿", prompt)
+
+    def test_document_locator_fields_do_not_change_legacy_video_artifact_schema(self):
+        video_segment = Segment("s1", 0, 1, "视频字幕")
+        document_segment = Segment("s1", 0, 1, "网页正文", locator_kind="document_order")
+        video_frame = Frame(1, "/tmp/frame.png")
+        document_frame = Frame(
+            1,
+            "/tmp/source.png",
+            media_kind="source_image",
+            locator_label="原文第 1 张图片",
+            source_url="https://example.com/source.png",
+        )
+        self.assertNotIn("locator_kind", video_segment.to_dict())
+        self.assertEqual(document_segment.to_dict()["locator_kind"], "document_order")
+        self.assertNotIn("media_kind", video_frame.to_dict())
+        self.assertNotIn("locator_label", video_frame.to_dict())
+        self.assertNotIn("source_url", video_frame.to_dict())
+        self.assertEqual(document_frame.to_dict()["media_kind"], "source_image")
+        self.assertEqual(document_frame.to_dict()["locator_label"], "原文第 1 张图片")
+        self.assertEqual(document_frame.to_dict()["source_url"], "https://example.com/source.png")
+
+    def test_document_source_image_uses_order_label_not_fake_video_timestamp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            assets = root / "assets"
+            assets.mkdir()
+            image = assets / "source-001.png"
+            image.write_bytes(b"png")
+            paragraphs = [Paragraph(["s000001"], "网页正文。", 0, 1)]
+            frames = [
+                Frame(
+                    1,
+                    str(image),
+                    ["s000001"],
+                    media_kind="source_image",
+                    locator_label="原文第 1 张图片",
+                )
+            ]
+            _align_document_images(paragraphs, frames)
+            note = root / "note.md"
+            compose_markdown(
+                note,
+                {
+                    "title": "网页笔记",
+                    "url": "https://example.com/post",
+                    "platform": "generic_web",
+                    "source_kind": "document",
+                    "source_id": "abc",
+                },
+                paragraphs,
+                frames,
+            )
+            rendered = note.read_text(encoding="utf-8")
+            self.assertIn('type: "source-manuscript"', rendered)
+            self.assertIn("tags: [source-manuscript, generic_web]", rendered)
+            self.assertIn("![原文第 1 张图片](assets/source-001.png)", rendered)
+            self.assertIn("*原文第 1 张图片*", rendered)
+            self.assertNotIn("画面时间", rendered)
+            self.assertNotIn("00m01s", rendered)
+
+    def test_document_index_is_separate_without_changing_video_daily_heading(self):
+        with tempfile.TemporaryDirectory() as temp:
+            vault = Path(temp)
+            video_note = vault / "Sources" / "Videos" / "video.md"
+            document_note = vault / "Sources" / "Documents" / "document.md"
+            update_indexes(
+                vault,
+                video_note,
+                {
+                    "title": "视频",
+                    "task_key": "20260717-1",
+                    "task_date": "2026-07-17",
+                    "source_kind": "video",
+                },
+            )
+            update_indexes(
+                vault,
+                document_note,
+                {
+                    "title": "文章",
+                    "task_key": "20260718-1",
+                    "task_date": "2026-07-18",
+                    "source_kind": "document",
+                },
+            )
+            self.assertTrue((vault / "Indexes" / "视频资料库.md").exists())
+            self.assertTrue((vault / "Indexes" / "来源资料库.md").exists())
+            self.assertEqual(
+                (vault / "Indexes" / "Daily" / "2026-07-17.md").read_text(encoding="utf-8").splitlines()[0],
+                "# 2026-07-17 视频笔记",
+            )
+            self.assertEqual(
+                (vault / "Indexes" / "Daily" / "2026-07-18.md").read_text(encoding="utf-8").splitlines()[0],
+                "# 2026-07-18 来源笔记",
+            )
+
+    def test_generic_web_downloads_allowlisted_image_type_into_document_frame(self):
+        info = GenericWebInfo(
+            url="https://example.com/article",
+            source_id="0123456789abcdef0123",
+            title="图文文章",
+            author="作者",
+            site_name="站点",
+            published_at="",
+            extraction_engine="readability-lxml",
+            segments=(
+                Segment(
+                    "s000001", 0, 1, "图片前的正文内容。", locator_kind="document_order"
+                ).to_dict(),
+            ),
+            images=(
+                {
+                    "url": "https://cdn.example.com/figure",
+                    "after_segment_id": "s000001",
+                    "order": 1,
+                    "alt": "架构图",
+                    "caption": "",
+                },
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "vtm_core.web._open_public_url",
+            return_value=(b"png-bytes", "https://cdn.example.com/figure", "image/png", "utf-8"),
+        ):
+            frames = GenericWebSourceAdapter().download_images(info, Path(temp), limit=1)
+            self.assertEqual(len(frames), 1)
+            self.assertEqual(Path(frames[0].path).suffix, ".png")
+            self.assertTrue(Path(frames[0].path).is_file())
+            self.assertEqual(frames[0].media_kind, "source_image")
+            self.assertEqual(frames[0].source_ids, ["s000001"])
+
+    def test_generic_web_image_limit_backfills_failed_downloads_and_caps_at_sixty(self):
+        images = tuple(
+            {
+                "url": f"https://cdn.example.com/figure-{index}.png",
+                "after_segment_id": "s000001",
+                "order": index,
+                "alt": "",
+                "caption": "",
+            }
+            for index in range(1, 63)
+        )
+        info = GenericWebInfo(
+            url="https://example.com/article",
+            source_id="0123456789abcdef0123",
+            title="多图文章",
+            author="作者",
+            site_name="站点",
+            published_at="",
+            extraction_engine="readability-lxml",
+            segments=(
+                Segment(
+                    "s000001", 0, 1, "图片前的正文内容。", locator_kind="document_order"
+                ).to_dict(),
+            ),
+            images=images,
+        )
+        successful = (b"png", "https://cdn.example.com/figure.png", "image/png", "utf-8")
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "vtm_core.web._open_public_url",
+            side_effect=[RuntimeError("first image unavailable")] + [successful] * 60,
+        ) as downloader:
+            frames = GenericWebSourceAdapter().download_images(info, Path(temp), limit=120)
+        self.assertEqual(len(frames), 60)
+        self.assertEqual(downloader.call_count, 61)
+        self.assertEqual(frames[0].locator_label, "原文第 2 张图片")
+
+    def test_generic_document_pipeline_reuses_four_pass_core_without_asr(self):
+        info = GenericWebInfo(
+            url="https://example.com/article",
+            source_id="0123456789abcdef0123",
+            title="公开网页测试",
+            author="网页作者",
+            site_name="示例站点",
+            published_at="2026-07-17",
+            extraction_engine="readability-lxml",
+            segments=(
+                Segment(
+                    "s000001",
+                    0,
+                    1,
+                    "完整网页正文包含观点、理由和具体操作步骤。",
+                    locator_kind="document_order",
+                ).to_dict(),
+            ),
+            images=(),
+        )
+
+        class FakeDocumentAdapter:
+            platform = "generic_web"
+            source_kind = "document"
+
+            def can_handle(self, value):
+                return True
+
+            def normalize_input_url(self, value):
+                return value
+
+            def canonicalize_input(self, value):
+                return value
+
+            def source_id_from_url(self, value):
+                return info.source_id
+
+            def selector_from_url(self, value, explicit=None):
+                return None
+
+            def inspect(self, value, selector=None):
+                return info
+
+            def reference(self, inspected):
+                return SourceReference(
+                    self.platform,
+                    self.source_kind,
+                    inspected.source_id,
+                    inspected.url,
+                    inspected.title,
+                    inspected.author,
+                )
+
+            def restore_info(self, metadata):
+                return info
+
+            def metadata(self, inspected):
+                payload = inspected.to_dict()
+                payload.update(self.reference(inspected).to_dict())
+                return payload
+
+            def content_segments(self, inspected):
+                return [Segment(**item) for item in inspected.segments], {
+                    "source": "public_html_document",
+                    "locator_kind": "document_order",
+                }
+
+            def download_images(self, inspected, assets_dir, *, limit=60):
+                return []
+
+            def context(self, inspected):
+                return "来源类型：公开网页文章；标题：公开网页测试"
+
+            def folder_marker(self, inspected):
+                return "WEB-0123456789ab"
+
+        adapter = FakeDocumentAdapter()
+        editor = SequenceClient(direct_manuscript_responses("完整网页正文包含观点、理由和具体操作步骤。"))
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"VTM_STATE_DIR": str(Path(temp) / "state")}
+        ), patch("vtm_core.pipeline.adapter_for", return_value=adapter), patch(
+            "vtm_core.pipeline.text_client", return_value=editor
+        ):
+            result = run(
+                Options(
+                    url=info.url,
+                    vault=Path(temp) / "vault",
+                    no_visual=True,
+                    task_key="20260717-2",
+                    task_date="2026-07-17",
+                )
+            )
+            note = Path(result["note"])
+            rendered = note.read_text(encoding="utf-8")
+        self.assertEqual(result["source_kind"], "document")
+        self.assertEqual(result["transcript_source"], "public_html_document")
+        self.assertIn("/Sources/Documents/", str(note))
+        self.assertIn("tags: [source-manuscript, generic_web]", rendered)
+        self.assertEqual(editor.calls, 4)
 
 
 if __name__ == "__main__":
