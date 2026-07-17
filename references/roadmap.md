@@ -35,7 +35,9 @@ Implemented for answer and article URLs through the Apache-2.0 `zhihu-tui` 0.1.3
 
 ### Douyin and Xiaohongshu
 
-Treat these as optional, best-effort adapters because share URLs, dynamic rendering, login requirements, and risk control change frequently. Process only content available through the user's authorized session. Prefer post text and platform captions; download media only when necessary for ASR or indispensable visual evidence.
+Douyin public video support is implemented by adapting the Apache-2.0 Social Media Toolkit share-page `_ROUTER_DATA` parser. It accepts direct, short, and share-text video links without a key, validates all platform/CDN redirects, bounds HTML/media sizes, excludes comments and account data, downloads the public video once for local ASR, creates an at-most-720p analysis copy, and reuses the original local media for final retained-frame recapture. Real metadata and media downloads passed from both the Denmark development exit and mainland production exit. Image notes remain explicitly outside this video adapter.
+
+Xiaohongshu remains the next document-source integration. Prefer a maintained licensed public-state parser, preserve original image order and accompanying text, and keep login/dynamic-rendering/risk-control failure explicit. Do not promise that one API key unlocks arbitrary public content.
 
 ## One multimodal model
 
@@ -47,4 +49,4 @@ A single image-capable provider/model may already serve both text and vision by 
 2. Add the source-adapter protocol without changing Bilibili output.
 3. Implement YouTube and generic web-page adapters with fixture-based regression tests (complete).
 4. Add Zhihu answer/article documents (complete).
-5. Evaluate Douyin and Xiaohongshu as optional integrations against platform stability and account safety.
+5. Add Douyin public videos (complete), then evaluate Xiaohongshu public image notes against platform stability and account safety.

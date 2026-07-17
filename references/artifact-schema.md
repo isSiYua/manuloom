@@ -28,6 +28,8 @@ Public documents use a parallel layout:
 
 Zhihu answers and articles use `[ZH-A-answer_id]` and `[ZH-P-article_id]` markers in the same document tree.
 
+Douyin videos remain in the video tree and use `[DY-aweme_id]` markers.
+
 Operational content outside the Vault:
 
 ```text

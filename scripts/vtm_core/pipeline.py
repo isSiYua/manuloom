@@ -126,6 +126,17 @@ def _resume_checkpoint(resume_dir: Path | None, destination: Path) -> None:
         shutil.copy2(candidate, destination)
 
 
+def _source_folder_name(task_key: str, title: str, marker: str) -> str:
+    """Preserve the stable source marker when a long title reaches the name cap."""
+
+    suffix = f" [{marker}]"
+    raw = safe_name(f"{task_key}-{title}{suffix}")
+    if raw.endswith(suffix):
+        return raw
+    prefix = safe_name(f"{task_key}-{title}")[: max(1, 100 - len(suffix))].rstrip(" .")
+    return f"{prefix}{suffix}"
+
+
 def run(options: Options) -> dict[str, Any]:
     state = state_root()
     vault_root = options.vault.expanduser().resolve()
@@ -168,7 +179,7 @@ def run(options: Options) -> dict[str, Any]:
         _progress(options, "正在读取视频信息。" if is_video else "正在读取来源信息。")
         reference = adapter.reference(info)
         full_title = reference.title
-        folder = safe_name(f"{options.task_key}-{full_title} [{adapter.folder_marker(info)}]")
+        folder = _source_folder_name(options.task_key, full_title, adapter.folder_marker(info))
         year, month = options.task_date[:4], options.task_date[:7]
         collection = "Videos" if is_video else "Documents"
         job_dir = vault_root / "Sources" / collection / year / month / folder

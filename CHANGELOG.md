@@ -15,6 +15,8 @@
 - Rejects credential-bearing, non-HTTP(S), localhost, private, and reserved source URLs; bounds HTML/image response sizes and excludes navigation, comments, recommendations, and other page chrome.
 - Adds Zhihu answer/article support through the Apache-2.0 `zhihu-tui` client, reusing the document manuscript core while preserving links, inline code, LaTeX, and original images.
 - Attempts Zhihu public reads first and reports an actionable limitation when risk control requires the user's hidden `z_c0`; no shared Cookie or unofficial public key is embedded.
+- Adds public Douyin video support by adapting the Apache-2.0 `social-post-extractor-mcp` share-page parser, then reusing the existing one-download local ASR and dynamic visual pipeline.
+- Validates Douyin redirects and CDN hosts, caps responses at 8MB/2GB, stores no expiring signed media URL in durable metadata, and requires no API key or Cookie for public-share mode.
 
 ## 1.1.0 — deployment packaging
 

@@ -42,6 +42,13 @@ from vtm_core.direct_manuscript import (
     merge_visual_requests,
     visual_requests_from_plan,
 )
+from vtm_core.douyin import (
+    DouyinClient,
+    DouyinSourceAdapter,
+    DouyinVideoInfo,
+    _media_url as validate_douyin_media_url,
+    parse_douyin_router_data,
+)
 from vtm_core.models import Frame, InformationUnit, OutlineSection, Paragraph, Segment
 from vtm_core.sources import BilibiliSourceAdapter, SourceAdapter, SourceReference, adapter_for
 from vtm_core.manuscript import (
@@ -55,7 +62,14 @@ from vtm_core.manuscript import (
     manuscript_quality_report,
 )
 from vtm_core.output import compose_markdown, plan_frame_evidence, plan_frame_evidence_groups, update_indexes
-from vtm_core.pipeline import Options, _DocumentEditingClient, _align_document_images, _resume_checkpoint, run
+from vtm_core.pipeline import (
+    Options,
+    _DocumentEditingClient,
+    _align_document_images,
+    _resume_checkpoint,
+    _source_folder_name,
+    run,
+)
 from vtm_core.bilibili import VideoInfo
 from vtm_core.transcript import (
     BATCH_EDIT_MAX_ATTEMPTS,
@@ -371,7 +385,7 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(payload["acquisition"]["future_sources_fork_manuscript_core"])
         self.assertEqual(
             payload["acquisition"]["installed_video_platforms"],
-            ["bilibili", "youtube"],
+            ["bilibili", "youtube", "douyin"],
         )
         self.assertFalse(payload["acquisition"]["youtube_public_mode_requires_api_key"])
         self.assertTrue(
@@ -2209,6 +2223,11 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(zhihu["adapter_installed"])
         self.assertEqual(zhihu["credentials"][0]["id"], "zhihu_z_c0")
         self.assertFalse(zhihu["credentials"][0]["configured"])
+        douyin = platform_configuration("5", {})
+        self.assertEqual(douyin["platform"], "douyin")
+        self.assertTrue(douyin["adapter_installed"])
+        self.assertEqual(douyin["credentials"], [])
+        self.assertIn("无需配置", douyin["secret_instruction"])
         self.assertEqual(platform_configuration("B站", {})["platform"], "bilibili")
 
     def test_dedicated_secret_store_is_private_allowlisted_and_removable(self):
@@ -4564,6 +4583,111 @@ class CoreTests(unittest.TestCase):
             self.assertTrue(get_task(vault, remove_two["task_key"], include_deleted=True)["deleted_at"])
             self.assertIn("[RUNNING]", messages[0][1])
             self.assertIn("[COMPLETE]", messages[-1][1])
+
+    def test_douyin_router_data_maps_public_video_without_reimplementing_pipeline(self):
+        payload = {
+            "loaderData": {
+                "video_(id)/page": {
+                    "videoInfoRes": {
+                        "item_list": [
+                            {
+                                "aweme_id": "7604129988555574538",
+                                "desc": "公开抖音知识视频 #测试",
+                                "create_time": 1700000000,
+                                "author": {"nickname": "测试作者"},
+                                "video": {
+                                    "duration": 12500,
+                                    "width": 1080,
+                                    "height": 1920,
+                                    "play_addr": {
+                                        "url_list": [
+                                            "https://aweme.snssdk.com/aweme/v1/play/?video_id=public"
+                                        ]
+                                    },
+                                    "cover": {
+                                        "url_list": ["https://p26-sign.douyinpic.com/cover.jpeg"]
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        info = parse_douyin_router_data(payload, "7604129988555574538")
+        self.assertEqual(info.video_id, "7604129988555574538")
+        self.assertEqual(info.title, "公开抖音知识视频 #测试")
+        self.assertEqual(info.owner, "测试作者")
+        self.assertEqual(info.duration, 12.5)
+        self.assertEqual(info.height, 1920)
+        self.assertTrue(info.video_url.startswith("https://aweme.snssdk.com/"))
+        adapter = DouyinSourceAdapter()
+        self.assertEqual(adapter.reference(info).source_key, "douyin:7604129988555574538")
+        metadata = adapter.metadata(info)
+        self.assertNotIn("video_url", metadata)
+        self.assertEqual(metadata["extraction_engine"], "social-post-extractor-mcp-router-data")
+
+    def test_douyin_adapter_handles_direct_and_share_text_urls(self):
+        adapter = DouyinSourceAdapter()
+        direct = "https://www.douyin.com/video/7604129988555574538?previous_page=web_code_link"
+        self.assertTrue(adapter.can_handle(direct))
+        self.assertTrue(adapter.can_handle(f"复制打开抖音 {direct} 查看视频"))
+        self.assertEqual(
+            adapter.canonicalize_input(direct),
+            "https://www.douyin.com/video/7604129988555574538",
+        )
+        self.assertEqual(adapter.source_id_from_url(direct), "7604129988555574538")
+        self.assertIsInstance(adapter_for(direct), DouyinSourceAdapter)
+        self.assertFalse(adapter.can_handle("https://example.com/video/7604129988555574538"))
+
+    def test_douyin_short_link_canonicalization_reuses_public_redirect(self):
+        client = DouyinClient()
+        with patch.object(
+            client,
+            "_fetch_html",
+            return_value=("", "https://www.douyin.com/video/7604129988555574538?from=share"),
+        ):
+            canonical = client.canonicalize("https://v.douyin.com/example/")
+        self.assertEqual(canonical, "https://www.douyin.com/video/7604129988555574538")
+
+    def test_douyin_router_rejects_image_note_and_untrusted_media_host(self):
+        image_payload = {
+            "loaderData": {
+                "note_(id)/page": {
+                    "videoInfoRes": {"item_list": [{"aweme_id": "123", "images": [{}]}]}
+                }
+            }
+        }
+        with self.assertRaisesRegex(RuntimeError, "图文作品"):
+            parse_douyin_router_data(image_payload, "123")
+        with self.assertRaisesRegex(RuntimeError, "不受信任"):
+            validate_douyin_media_url("https://evil.example/video.mp4")
+
+    def test_douyin_transcript_contract_falls_back_to_existing_local_asr(self):
+        info = DouyinVideoInfo(
+            url="https://www.douyin.com/video/7604129988555574538",
+            video_id="7604129988555574538",
+            title="测试",
+            duration=60,
+            owner="作者",
+            cover="",
+            width=1080,
+            height=1920,
+            published_at="",
+        )
+        adapter = DouyinSourceAdapter()
+        primary, primary_meta = adapter.primary_transcript(info)
+        secondary, secondary_meta = adapter.secondary_transcript(info)
+        self.assertEqual(primary, [])
+        self.assertEqual(secondary, [])
+        self.assertIn("没有提供原生字幕", primary_meta["warning"])
+        self.assertIn("本地 ASR", secondary_meta["warning"])
+
+    def test_long_source_folder_name_preserves_stable_marker(self):
+        marker = "DY-7538955201693994298"
+        folder = _source_folder_name("20260717-1", "很长的抖音标题" * 30, marker)
+        self.assertLessEqual(len(folder), 100)
+        self.assertTrue(folder.endswith(f"[{marker}]"))
 
     def test_generic_web_parser_preserves_ordered_article_text_images_and_tables(self):
         source = """

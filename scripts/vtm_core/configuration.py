@@ -38,8 +38,6 @@ SECRET_SPECS = (
     SecretSpec("bilibili_cookie", "BILIBILI_COOKIE", "Bilibili 完整 Cookie Header", "bilibili"),
     SecretSpec("youtube_api_key", "YOUTUBE_API_KEY", "YouTube Data API Key", "youtube"),
     SecretSpec("zhihu_z_c0", "ZHIHU_Z_C0", "知乎登录 Cookie z_c0", "zhihu"),
-    SecretSpec("douyin_client_key", "DOUYIN_CLIENT_KEY", "抖音开放平台 Client Key", "douyin"),
-    SecretSpec("douyin_client_secret", "DOUYIN_CLIENT_SECRET", "抖音开放平台 Client Secret", "douyin"),
 )
 
 PLATFORM_SPECS = (
@@ -92,11 +90,11 @@ PLATFORM_SPECS = (
         "douyin",
         "抖音",
         ("抖音", "douyin"),
-        False,
-        "计划提供公开分享链接 best-effort 模式。",
-        ("douyin_client_key", "douyin_client_secret"),
+        True,
+        "公开视频分享链接无凭据模式已安装；无原生字幕时使用服务器本地 ASR。",
+        (),
         "https://developer.open-douyin.com/",
-        "开放平台凭据只适用于已审核应用、用户授权和获批 scope，不代表任意视频读取。",
+        "公共分享页提取不使用 Client Key；开放平台凭据仅保留给未来已审核应用和用户授权能力。平台风控或已删除内容不会被绕过。",
     ),
     PlatformSpec(
         6,
@@ -198,8 +196,12 @@ def platform_configuration(value: str | int, environ: Mapping[str, str] | None =
         "setup_url": spec.setup_url,
         "limitations": spec.limitations,
         "secret_instruction": (
-            "通过 SSH 运行 scripts/vtm configure secret <配置项>；终端隐藏输入。"
-            "不要把 Cookie、API Key、Secret 或 Token 发到聊天。"
+            (
+                "通过 SSH 运行 scripts/vtm configure secret <配置项>；终端隐藏输入。"
+                "不要把 Cookie、API Key、Secret 或 Token 发到聊天。"
+            )
+            if credentials
+            else "当前公开模式无需配置 Cookie、API Key、Secret 或 Token。"
         ),
     }
 
