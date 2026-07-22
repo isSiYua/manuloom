@@ -119,7 +119,8 @@ class LocalWebTest(unittest.TestCase):
         self.assertEqual(manifest["permissions"], ["activeTab", "storage"])
         self.assertNotIn("<all_urls>", json.dumps(manifest))
         self.assertTrue(all(value.startswith("http://127.0.0.1") or value.startswith("http://localhost") for value in manifest["host_permissions"]))
-        self.assertTrue(all((root / "browser-extension" / value).is_file() for value in manifest["icons"].values()))
+        self.assertNotIn("icons", manifest)
+        self.assertNotIn("default_icon", manifest["action"])
         extension_text = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (root / "browser-extension").iterdir()
