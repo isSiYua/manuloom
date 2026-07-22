@@ -10,14 +10,14 @@ DRY_RUN=false
 
 usage() {
     cat <<'EOF'
-Install video-to-detailed-manuscript on a Debian/Ubuntu server.
+Install manuloom on a Debian/Ubuntu server.
 
 Run this as the same Unix user that runs the Agent service.
 
 Usage:
   ./install.sh --agent hermes
   ./install.sh --agent codex
-  ./install.sh --skill-dir /absolute/path/to/agent/skills/video-to-detailed-manuscript
+  ./install.sh --skill-dir /absolute/path/to/agent/skills/manuloom
 
 Options:
   --agent hermes|codex       Link this repository into a known Agent skill directory.
@@ -88,10 +88,10 @@ done
 if [ -z "$SKILL_DIR" ]; then
     case "$AGENT" in
         hermes)
-            SKILL_DIR="$HOME/.hermes/skills/video-to-detailed-manuscript"
+            SKILL_DIR="$HOME/.hermes/skills/manuloom"
             ;;
         codex)
-            SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/video-to-detailed-manuscript"
+            SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/manuloom"
             ;;
         "")
             fail "choose --agent hermes, --agent codex, or --skill-dir PATH"
@@ -171,7 +171,7 @@ else
     run ln -s "$SCRIPT_DIR" "$SKILL_DIR"
 fi
 
-run "$SCRIPT_DIR/scripts/vtm" doctor
+run "$SCRIPT_DIR/scripts/manuloom" doctor
 
 cat <<EOF
 
@@ -181,7 +181,7 @@ Skill: $SKILL_DIR
 Next steps:
 1. Configure your own text-model API key and optional vision-model API key.
 2. Point VTM_VAULT at your Obsidian Vault.
-3. Restart the Agent service, then run: scripts/vtm doctor
+3. Restart the Agent service, then run: scripts/manuloom doctor
 
 No API key, Cookie, Feishu credential, or private note was created by this installer.
 EOF

@@ -5,18 +5,20 @@ Run the installer as the same Unix user that runs the Agent. The reference targe
 ## One-command dependency and Skill installation
 
 ```bash
-git clone https://github.com/isSiYua/video-to-detailed-manuscript.git
-cd video-to-detailed-manuscript
+git clone https://github.com/isSiYua/manuloom.git
+cd manuloom
 ./install.sh --agent hermes
 ```
 
 For Codex use `./install.sh --agent codex`. For another Agent, pass its exact Skill destination:
 
 ```bash
-./install.sh --skill-dir /absolute/path/to/agent/skills/video-to-detailed-manuscript
+./install.sh --skill-dir /absolute/path/to/agent/skills/manuloom
 ```
 
 The full installer installs `ffmpeg`, `ffprobe`, Chinese Tesseract OCR, Python, pip, Git, `yt-dlp`, CPU PyTorch, torchaudio, FunASR, and ModelScope. It then calls the existing `prepare-asr`, links the repository into the selected Agent Skill directory, and runs `doctor`.
+
+For an existing Hermes + Feishu installation, continue with the dedicated [Hermes + Feishu guide](docs/hermes-feishu.md). For a local computer, the [browser-extension guide](docs/browser-extension.md) provides a loopback-only web bridge and Chromium extension; a server is not required.
 
 Use `--dry-run` to inspect every command without changing the server. Use `--minimal` to skip local ASR packages and model downloads; videos without usable subtitles will then require another prepared ASR backend.
 
@@ -39,7 +41,7 @@ The installer never overwrites an existing Skill directory. If the target alread
 To update a linked installation later:
 
 ```bash
-cd video-to-detailed-manuscript
+cd manuloom
 git pull --ff-only
-scripts/vtm doctor
+scripts/manuloom doctor
 ```

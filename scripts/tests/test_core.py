@@ -286,7 +286,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(installer.is_file())
         skill_before = (root / "SKILL.md").read_bytes()
         with tempfile.TemporaryDirectory() as temp:
-            target = Path(temp) / "agent-skills" / "video-to-detailed-manuscript"
+            target = Path(temp) / "agent-skills" / "manuloom"
             completed = subprocess.run(
                 [
                     "sh",
@@ -305,7 +305,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("requirements.txt", completed.stdout)
             self.assertIn("ln -s", completed.stdout)
-            self.assertIn("scripts/vtm doctor", completed.stdout)
+            self.assertIn("scripts/manuloom doctor", completed.stdout)
             self.assertFalse(target.exists())
         self.assertEqual((root / "SKILL.md").read_bytes(), skill_before)
 
@@ -2448,11 +2448,11 @@ class CoreTests(unittest.TestCase):
     def test_duplicate_skill_installations_are_detected(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
-            first = home / ".hermes" / "skills" / "video-to-detailed-manuscript"
-            backup = home / ".hermes" / "skills" / "video-to-detailed-manuscript.pre-v4"
+            first = home / ".hermes" / "skills" / "manuloom"
+            backup = home / ".hermes" / "skills" / "manuloom.pre-v4"
             first.mkdir(parents=True)
             backup.mkdir(parents=True)
-            manifest = "---\nname: video-to-detailed-manuscript\ndescription: test\n---\n"
+            manifest = "---\nname: manuloom\ndescription: test\n---\n"
             (first / "SKILL.md").write_text(manifest, encoding="utf-8")
             (backup / "SKILL.md").write_text(manifest, encoding="utf-8")
             with patch("video_manuscript.Path.home", return_value=home):

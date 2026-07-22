@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>ManuLoom</title>
+</head>
+<body>
+  <main>
+    <header><span class="mark">M</span><div><h1>ManuLoom</h1><p>把当前页面编织成详细笔记</p></div></header>
+    <section id="page"><span class="label">当前页面</span><strong id="title">正在读取…</strong><small id="url"></small></section>
+    <label>本机服务地址<input id="endpoint" value="http://127.0.0.1:8766"></label>
+    <label>本机配对令牌<input id="token" type="password" autocomplete="off" placeholder="运行 scripts/manuloom browser-token"></label>
+    <button id="submit">生成 Obsidian 笔记</button>
+    <p id="status" role="status"></p>
+    <details><summary>如何开始</summary><ol><li>终端运行 <code>scripts/manuloom serve</code></li><li>运行 <code>scripts/manuloom browser-token</code></li><li>粘贴令牌后提交当前页面</li></ol></details>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

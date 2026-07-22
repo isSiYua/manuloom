@@ -14,7 +14,7 @@ from typing import Any
 
 from .models import Segment
 
-FUNASR_SENTINEL = Path.home() / ".cache" / "video-to-detailed-manuscript" / "funasr-paraformer.ready.json"
+FUNASR_SENTINEL = Path.home() / ".cache" / "manuloom" / "funasr-paraformer.ready.json"
 FUNASR_MODEL = "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
 FUNASR_VAD_MODEL = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
 FUNASR_PUNC_MODEL = "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"

@@ -101,7 +101,7 @@ Never paste a Cookie, API Key, Secret, or Token into Hermes or another chat. Fro
 scripts/vtm configure secret bilibili_cookie
 ```
 
-The dedicated store defaults to `~/.config/video-to-detailed-manuscript/secrets.env`; its directory is `0700`, the file and lock are `0600`, and writes are atomic. It contains only allowlisted project variables. The loader reads this project file first and fills still-missing allowlisted values from the legacy `~/.hermes/.env`; it never loads unrelated environment entries. Status output contains booleans and labels only.
+The dedicated store defaults to `~/.config/manuloom/secrets.env`; its directory is `0700`, the file and lock are `0600`, and writes are atomic. It contains only allowlisted project variables. The loader reads this project file first and fills still-missing allowlisted values from the legacy `~/.hermes/.env`; it never loads unrelated environment entries. Status output contains booleans and labels only.
 
 Public acquisition is preferred. Bilibili public videos need no credential; its complete Cookie header is optional. YouTube public video extraction is installed and needs no API Key; a Data API Key remains an optional metadata/API enhancement, not a universal subtitle credential. Zhihu answer/article extraction attempts public API access first and may require the user's own `z_c0` when risk control rejects anonymous traffic. Douyin public-share video extraction is installed and needs no API Key or Cookie; official client credentials are not collected because they apply only to reviewed applications and authorized scopes. The currently documented Xiaohongshu merchant/mini-app credentials are not treated as a general public-note reading API.
 
@@ -148,9 +148,15 @@ scripts/vtm configure secret source_proxy
 
 Do not use public proxy lists or place a proxy URL containing credentials in chat, source code, `.env.example`, logs, or task artifacts. A proxy changes reachability only; it does not bypass login, payment, copyright, geographic, or platform controls.
 
-## Server baseline
+## Server sizing
 
-Use a mainland China ECS in Shanghai or Hangzhou. Start with 4 vCPU, 8 GB RAM, 40–80 GB SSD, Ubuntu 24.04, no GPU, and one CPU-ASR job; test two only after observing memory. Use Feishu WebSocket mode so the service does not need a public web endpoint.
+Choose capacity by evidence path, not by marketing tiers:
+
+- Lowest-cost, subtitle/document-heavy personal use: start with 2 vCPU, 4 GB RAM, 30–40 GB SSD, no GPU, and one worker. Use `--minimal`; a video without usable subtitles will need ASR prepared elsewhere or a later upgrade.
+- Local CPU ASR on the same machine: use 4 vCPU, 8 GB RAM, 40–80 GB SSD and one ASR worker. This is the reference reliability profile, not a requirement for every user.
+- No real-time requirement: leave `VTM_MAX_CONCURRENT_JOBS=1`. Queued work may finish later that day without paying for parallel capacity.
+
+For a mainland deployment, Shanghai or Hangzhou usually improves Bilibili/ModelScope locality, while foreign platforms can remain unreachable. Use Feishu WebSocket mode so the service does not need a public inbound endpoint.
 
 Run native-subtitle jobs without ASR or audio download. For missing subtitles, use the preloaded CPU Paraformer model. It provides timestamps needed to align frames and avoids the Hugging Face/Xet route that can fail from mainland networks. The reference 4-vCPU/8-GB deployment permits at most two workers. Start with one worker when most videos require CPU ASR; use two after observing memory, or when jobs usually have native subtitles. Additional submitted tasks remain queued.
 

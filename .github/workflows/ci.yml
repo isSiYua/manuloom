@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r scripts/requirements.txt
+      - name: Compile Python
+        run: python -m compileall -q scripts
+      - name: Offline tests
+        env:
+          PYTHONPATH: scripts
+        run: python -m unittest discover -s scripts/tests -p 'test_*.py' -v
+      - name: Installer dry run
+        run: |
+          sh -n install.sh
+          ./install.sh --skill-dir /tmp/manuloom-minimal --minimal --skip-system-packages --dry-run
+          ./install.sh --skill-dir /tmp/manuloom-full --skip-system-packages --dry-run
+          test ! -e /tmp/manuloom-minimal
+          test ! -e /tmp/manuloom-full

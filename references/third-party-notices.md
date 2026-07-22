@@ -34,3 +34,7 @@ slidegeist (MIT) was studied for its conservative practice of sampling about 80%
 FFmpeg's `freezedetect` filter is used to identify low-change intervals inside an already planned scene window. It analyzes downscaled local frames without saving or uploading additional candidates. https://ffmpeg.org/ffmpeg-filters.html#freezedetect
 
 The W3C WAI image decision tree informed the mutually exclusive visual publication policy: redundant or decorative images are dropped, reliably recoverable simple text can replace an image, and complex or uncertain visual information retains the original image. No W3C source code is used. https://www.w3.org/WAI/tutorials/images/decision-tree/
+
+Obsidian Web Clipper (MIT) was reviewed as a successful local note-capture user experience and cross-browser distribution reference. ManuLoom's extension, popup, loopback API, permissions, and pairing-token implementation were written independently; no Obsidian Web Clipper code, template, icon, or visual asset is copied or substantially rewritten. https://github.com/obsidianmd/obsidian-clipper
+
+Chrome's official extension documentation informed the narrow `activeTab`, `storage`, and loopback `host_permissions` choices. Documentation concepts are not copied code. https://developer.chrome.com/docs/extensions/develop/concepts/activeTab

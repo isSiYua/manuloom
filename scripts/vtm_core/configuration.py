@@ -117,7 +117,7 @@ def secret_store_path(home: Path | None = None) -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     root = home or Path.home()
-    return root / ".config" / "video-to-detailed-manuscript" / "secrets.env"
+    return root / ".config" / "manuloom" / "secrets.env"
 
 
 def resolve_platform(value: str | int) -> PlatformSpec:
@@ -232,7 +232,7 @@ def _write_secret_store(path: Path, values: Mapping[str, str]) -> None:
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write("# Managed by video-to-detailed-manuscript. Do not share.\n")
+                handle.write("# Managed by manuloom. Do not share.\n")
                 for key in sorted(values):
                     if key in SECRET_ENV_KEYS and values[key]:
                         handle.write(f"{key}={values[key]}\n")
