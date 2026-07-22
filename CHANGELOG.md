@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Makes the Chinese README the default repository landing page and moves the English version to `README.en.md`.
+- Removes the decorative launch banner, README badges, and generated browser-extension icons for a cleaner text-first presentation.
+
 ## 1.2.0 — ManuLoom public launch
 
 - Rebrands the public project as ManuLoom while retaining the compatible `scripts/vtm` launcher and `VTM_*` runtime variables.
