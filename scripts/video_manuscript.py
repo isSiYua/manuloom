@@ -23,7 +23,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from vtm_core.asr import faster_whisper_model_path, funasr_ready, prepare_funasr  # noqa: E402
-from vtm_core import PIPELINE_VERSION  # noqa: E402
+from vtm_core import PIPELINE_VERSION, __version__  # noqa: E402
 from vtm_core.configuration import (  # noqa: E402
     SECRET_ENV_KEYS,
     configuration_menu,
@@ -38,6 +38,12 @@ from vtm_core.pipeline import Options, run  # noqa: E402
 from vtm_core.output import remove_index_entries, update_indexes  # noqa: E402
 from vtm_core.direct_manuscript import create_direct_manuscript  # noqa: E402
 from vtm_core.llm import text_client  # noqa: E402
+from vtm_core.local_web import (  # noqa: E402
+    DEFAULT_PORT,
+    browser_token_path,
+    load_or_create_browser_token,
+    serve_local,
+)
 from vtm_core.models import Frame, Segment  # noqa: E402
 from vtm_core.utils import atomic_json, load_json  # noqa: E402
 from vtm_core.visual import (  # noqa: E402
@@ -111,7 +117,7 @@ def duplicate_skill_paths() -> list[str]:
             prefix = manifest.read_text(encoding="utf-8")[:2000]
         except OSError:
             continue
-        if re.search(r"(?m)^name:\s*[\"']?video-to-detailed-manuscript[\"']?\s*$", prefix):
+        if re.search(r"(?m)^name:\s*[\"']?manuloom[\"']?\s*$", prefix):
             matches.append(str(manifest.parent))
     return sorted(matches)
 
@@ -886,6 +892,17 @@ def parser() -> argparse.ArgumentParser:
     cancel_identity.add_argument("--latest-running", action="store_true")
     cancel_parser.add_argument("--vault", type=Path, default=default_vault())
     commands.add_parser("cleanup")
+    token_parser = commands.add_parser(
+        "browser-token",
+        help="create or print the local browser-extension pairing token",
+    )
+    token_parser.add_argument("--rotate", action="store_true")
+    serve_parser = commands.add_parser(
+        "serve",
+        help="run the loopback-only local web and browser-extension bridge",
+    )
+    serve_parser.add_argument("--vault", type=Path, default=default_vault())
+    serve_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     return root
 
 
@@ -897,6 +914,7 @@ def doctor() -> dict[str, object]:
     state.mkdir(parents=True, exist_ok=True)
     duplicates = duplicate_skill_paths()
     return {
+        "package_version": __version__,
         "pipeline_version": PIPELINE_VERSION,
         "python": sys.version.split()[0], "ffmpeg": shutil.which("ffmpeg"), "ffprobe": shutil.which("ffprobe"),
         "tesseract": shutil.which("tesseract"), "yt_dlp": importlib.util.find_spec("yt_dlp") is not None,
@@ -1240,6 +1258,15 @@ def main() -> int:
             result = cancel_job(args.vault, args.task, latest_running=args.latest_running)
         elif args.command == "cleanup":
             result = {"status": "complete", "removed": cleanup_storage()}
+        elif args.command == "browser-token":
+            token_path = browser_token_path()
+            if args.rotate:
+                token_path.unlink(missing_ok=True)
+            token, token_path = load_or_create_browser_token(token_path)
+            result = {"token": token, "path": str(token_path), "permissions": "0600"}
+        elif args.command == "serve":
+            serve_local(vault=args.vault, port=args.port)
+            return 0
         elif args.command == "inspect":
             adapter = adapter_for(args.url)
             canonical = adapter.canonicalize_input(args.url)
@@ -1263,7 +1290,7 @@ def main() -> int:
             duplicates = duplicate_skill_paths()
             if len(duplicates) > 1:
                 raise RuntimeError(
-                    "检测到多个同名 video-to-detailed-manuscript Skill，请将备份移出 ~/.hermes/skills："
+                    "检测到多个同名 manuloom Skill，请将备份移出 ~/.hermes/skills："
                     + "；".join(duplicates)
                 )
             if not args.url and not args.resume:

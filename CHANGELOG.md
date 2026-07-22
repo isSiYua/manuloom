@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased — multi-source foundation
+## 1.2.0 — ManuLoom public launch
+
+- Rebrands the public project as ManuLoom while retaining the compatible `scripts/vtm` launcher and `VTM_*` runtime variables.
+- Adds an original project banner, bilingual launch documentation, a copyright-safe synthetic reference note, contribution templates, security policy, and public CI.
+- Adds a loopback-only local web bridge protected by a mode-`0600` pairing token.
+- Adds a Manifest V3 browser extension with only `activeTab`, `storage`, and loopback host permissions; it contains no model or platform credential.
+- Documents one-Skill Hermes + Feishu deployment and a lowest-cost subtitle/document-first server profile.
+- Does not add a model call, change the manuscript prompts, or alter the pipeline version.
+
+## Multi-source foundation
 
 - Adds the source-adapter discovery protocol and wraps the frozen Bilibili client without changing `pipeline_version: 1.0.0`.
 - Adds a deterministic core/platform configuration menu with explicit installed-versus-planned capability status.

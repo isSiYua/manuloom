@@ -1,13 +1,13 @@
 # Agent installation
 
-Keep one canonical copy of this folder. Install it by copying or symlinking the whole `video-to-detailed-manuscript` directory into the target Agent's configured skills directory. The core behavior lives in `scripts/video_manuscript.py`; product-specific Skill loading is only an invocation adapter.
+Keep one canonical copy of this folder. Install it by copying or symlinking the whole `manuloom` directory into the target Agent's configured skills directory. The core behavior lives in `scripts/video_manuscript.py`; product-specific Skill loading is only an invocation adapter.
 
 ## Hermes
 
 Place or link the folder under the Hermes skills directory, commonly:
 
 ```text
-~/.hermes/skills/video-to-detailed-manuscript/
+~/.hermes/skills/manuloom/
 ```
 
 Never keep a backup containing the same `SKILL.md` anywhere under `~/.hermes/skills/`. Hermes scans subdirectories and two manifests with the same `name` can route invocations to different versions. Move backups to `~/skill-backups/` or another directory outside the Skill scan root. `doctor` reports `duplicate_skill_paths` and refuses video runs while duplicates remain.

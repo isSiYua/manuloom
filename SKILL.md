@@ -1,5 +1,5 @@
 ---
-name: video-to-detailed-manuscript
+name: manuloom
 description: "Convert public Bilibili/YouTube/Douyin videos, Bilibili opus/column articles, Xiaohongshu/RedNote image notes, Zhihu answers/articles, and public generic-web/CSDN articles into detailed illustrated Obsidian manuscripts, then manage server-side results through natural Chinese. Always use for a supported source link or requests such as '提取这个视频', '提取这篇文章', '任务列表', '下载 1', '删除 1', '恢复 20260716-1', '终止任务', '协议自检', or '配置平台'. Produce an edited full-content note rather than a summary, verbatim transcript, or raw page copy: preserve every useful explanation, example, step, command, datum, qualifier, name, and caveat; remove fillers, page chrome, and genuine repetition; place useful video frames or original article images beside the matching passage. Also use to list, package, send, soft-delete, restore, cancel, self-check, configure, or inspect existing source-note tasks."
 ---
 

@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a general improvement or source adapter.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Privacy, cost, copyright, and model-call impact
+      description: State any new credentials, permissions, dependencies, or paid calls.
+    validations:
+      required: true

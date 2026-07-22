@@ -1,122 +1,215 @@
-# video-to-detailed-manuscript
+<p align="center">
+  <img src="docs/assets/manuloom-hero.jpg" alt="ManuLoom weaves video, audio, web, and image evidence into a structured manuscript" width="100%">
+</p>
 
-把 Bilibili/YouTube/抖音公共视频、Bilibili opus/专栏文章、小红书/RedNote 图文笔记、知乎回答/文章和普通公开网页整理成适合 Obsidian 的“有结构、有细节、有证据”的完整编辑文字稿，而不是简短摘要、原始 ASR 字幕或网页复制粘贴；更多来源通过同一适配器协议接入。
+<h1 align="center">ManuLoom</h1>
 
-这是一个可移植 Agent Skill：核心工作由确定性 Python CLI 完成，Hermes、Codex、Claude Code、OpenCode、Kimi Code 等支持 Skill/命令调用的 Agent 只负责理解自然语言、启动任务和传送结果。
+<p align="center">
+  Weave videos and web sources into detailed, source-grounded Obsidian notes.
+</p>
 
-## 主要能力
+<p align="center">
+  <a href="https://github.com/isSiYua/manuloom/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/isSiYua/manuloom/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-0ea5e9.svg"></a>
+  <a href="https://www.python.org/downloads/"><img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab.svg"></a>
+  <a href="README.zh-CN.md"><img alt="中文文档" src="https://img.shields.io/badge/docs-中文-8b5cf6.svg"></a>
+</p>
 
-- 字幕优先：原生字幕 → 登录态 AI 字幕/总结片段 → 本地 FunASR。
-- YouTube 公共模式优先人工字幕，再使用原语言自动字幕，缺失时才下载单路音频进行本地 ASR；不要求 API Key。
-- 普通网页/CSDN 公共模式提取正文、标题、作者、标题层级、列表、表格、代码和原图；跳过视频下载与 ASR。
-- Bilibili `/opus/<id>` 和 `/read/cv<id>` 按公开图文文档处理，绝不进入 BV 视频解析；任务下载继续使用同一来源无关的 ZIP 打包路径。
-- 网页正文选择复用 Apache-2.0 `readability-lxml`，标准 JSON-LD 元数据复用 BSD-3-Clause `extruct`；本项目只增加安全下载、结构保真、证据顺序和 Obsidian 编排。
-- 知乎回答/文章复用 Apache-2.0 `zhihu-tui` 获取结构化原始 HTML，保留链接、代码、LaTeX 和原图；先尝试公开读取，风控要求登录时使用用户自己的隐藏 `z_c0`。
-- 抖音公开视频复用 Apache-2.0 `social-post-extractor-mcp` 的公开分享页解析路径；不需要 API Key，页面没有原生字幕时只下载一次视频并交给既有本地 ASR，720p 分析后再从原始媒体定点取高清画面。
-- 小红书/RedNote 公开图文笔记复用同一 Apache-2.0 项目的初始状态解析器，保留正文块、话题和全部原图顺序；文字块与图片数量一致时一一对应插图，否则保留为同一有序图组。
-- 四阶段文字编辑：全文规划、黄金文风成稿、细节恢复、最终精简校对。
-- 保留观点、原因、例子、步骤、参数、代码、命令、数字、条件、限制和精确名称。
-- 字幕驱动的动态视觉规划，不按“每分钟一张”机械采样。
-- 720p 场景检测、OCR 和相似帧去重；只对 AI 请求区间内的不同页面调用视觉模型。
-- 简单文字、名单、表格、代码和公式在完整识别后转成可复制 Markdown/LaTeX。
-- 流程图、架构图、论文原图、复杂 UI、密集或部分识别画面保留截图，并放在对应正文之后。
-- 最终仅对保留图片按时间点从最高可用视频流重新截图，默认请求最高 1080p。
-- Obsidian Vault、每日任务编号、单篇 ZIP 下载、软删除/恢复、取消、进度通知与临时媒体清理。
+Most video tools stop at a transcript or a short summary. ManuLoom builds a readable manuscript instead: it preserves source-supported details, reconstructs coherent sections, selects useful visual evidence, and writes portable Markdown with local assets directly into an Obsidian Vault.
 
-## 处理流程
+It handles public Bilibili and YouTube videos, Douyin shares, Bilibili opus/articles, Xiaohongshu/RedNote image notes, Zhihu answers/articles, and ordinary public web pages through one evidence pipeline.
 
-```text
-公开来源链接
-  → 视频：字幕/本地 ASR
-  → 网页：有序正文块 + 原图
-  → 全文结构与视觉区间规划
-  → 视频 720p 场景候选 + OCR + 去重 / 网页原图对齐
-  → 可选视觉 API
-  → 四阶段详细文字稿编辑
-  → 画面文字替换 / 复杂图保留
-  → 视频最高 1080p 定点重截 / 网页保留原图
-  → Obsidian Markdown + assets
+> ManuLoom is local-first and bring-your-own-model. Hermes, Codex, Claude Code, OpenCode, Kimi Code, or another command-capable Agent can provide the chat interface, but the deterministic Python CLI remains the source of truth.
+
+**[中文说明](README.zh-CN.md) · [Reference output](examples/synthetic-pipeline-note/manuloom-demo.md) · [Deployment](DEPLOYMENT.md) · [Configuration](references/configuration.md)**
+
+## Why ManuLoom
+
+| Typical transcript summarizer | ManuLoom |
+|---|---|
+| Produces a short overview | Produces a detailed edited manuscript |
+| Treats subtitles as the whole source | Combines subtitles, ASR, page structure, OCR, and visual evidence |
+| Samples screenshots on a fixed interval | Plans visual ranges from the transcript and selects stable, information-complete states |
+| Describes every retained image | Publishes each visual as `drop`, `note_only`, `image_only`, or `image_with_note` |
+| Publishes partial output when a model pass fails | Fails closed and keeps audit artifacts instead of publishing an incomplete note |
+| Usually supports one video site | Uses a shared adapter protocol for videos and image-rich articles |
+
+The editorial goal is not “say less.” It is **preserve the source's useful detail without preserving its spoken repetition**.
+
+## What the output looks like
+
+The repository includes a copyright-safe, synthetic reference note showing the intended structure, information density, diagrams, tables, code, attribution, and visual placement:
+
+- **[Open the complete ManuLoom reference note](examples/synthetic-pipeline-note/manuloom-demo.md)**
+- The editorial contract lives in [golden-quality.md](references/golden-quality.md).
+- The style examples live in [golden-style-example.md](references/golden-style-example.md).
+
+```markdown
+## Evidence acquisition and fallback
+
+ManuLoom prefers an existing subtitle track because it preserves timing without
+another recognition pass. When no usable subtitle exists, it downloads one audio
+stream and runs the configured local ASR backend.
+
+![Evidence pipeline](assets/evidence-pipeline.svg)
+
+The final note retains the source URL, platform identity, and local media assets.
+Temporary video, audio, and WAV files are removed after success, failure, or cancellation.
 ```
 
-## 快速开始
+## Supported sources
 
-在 Debian/Ubuntu 服务器上，克隆仓库后运行一键安装器：
+| Source | Public mode | Optional credentials | Evidence path |
+|---|---:|---|---|
+| Bilibili video | Yes | Cookie for optional login-only enhancements | Native/AI subtitle → local ASR fallback → dynamic frames |
+| YouTube video | Yes | Data API key is optional | Manual/original-language subtitle → local ASR fallback → dynamic frames |
+| Douyin video | Yes | None | Public share page → one media download → local ASR → dynamic frames |
+| Bilibili opus/article | Yes | None for public content | Ordered HTML blocks + original images |
+| Xiaohongshu/RedNote image note | Yes | None for public image notes | Ordered text/topics + original images |
+| Zhihu answer/article | Best effort | Your own `z_c0` only when risk control requires it | Structured HTML + links/code/LaTeX/images |
+| Generic web/CSDN | Yes, when reachable | None | Main article structure + tables/code/images |
+
+ManuLoom does not bypass logins, paywalls, copyright restrictions, regional restrictions, deleted content, or platform risk controls.
+
+## Pipeline
+
+```text
+public source URL
+  ├─ video → subtitles or local ASR
+  └─ document → ordered text blocks and original images
+        ↓
+full-source outline and visual-range planning
+        ↓
+local scene/OCR/dedup analysis on requested ranges
+        ↓
+four-stage manuscript editing
+        ↓
+visual publication decision and high-resolution recapture
+        ↓
+Obsidian Markdown + local assets + audit artifacts
+```
+
+DeepSeek (or another compatible text model) decides semantic structure and wording. Python validates chronology, JSON contracts, task state, storage, visual budgets, and failure gates. Optional Qwen-VL (or another compatible vision model) reads only locally selected visual candidates; frame selection does not add a second paid comparison round.
+
+## Quick start
+
+### Debian or Ubuntu
 
 ```bash
-git clone https://github.com/isSiYua/video-to-detailed-manuscript.git
-cd video-to-detailed-manuscript
+git clone https://github.com/isSiYua/manuloom.git
+cd manuloom
 ./install.sh --agent hermes
 ```
 
-Codex 使用 `--agent codex`；其他 Agent 使用 `--skill-dir` 指定其 Skill 目录。安装器会安装 `ffmpeg`、Python 依赖和 CPU 版 FunASR，准备三个固定的 ModelScope 模型，建立 Skill 链接并运行 `doctor`。它不会安装 Agent、配置飞书或写入任何密钥。
-
-如果只处理已有字幕的视频，可以跳过较大的本地 ASR：
+Use `--agent codex` for Codex, or `--skill-dir /absolute/agent/skills/manuloom` for another Agent. To skip the larger local ASR installation when most of your sources already contain subtitles:
 
 ```bash
-./install.sh --agent hermes --minimal
+./install.sh --agent codex --minimal
 ```
 
-完整安装选项、三个 FunASR 模型的准确 ID 与官方链接见 [DEPLOYMENT.md](DEPLOYMENT.md)。环境变量和模型切换见 [references/configuration.md](references/configuration.md)。
+### macOS local machine
 
-## 模型配置
-
-参考低成本组合：
-
-- 文字：DeepSeek V4 Flash
-- 视觉：Qwen3-VL-Flash
-- ASR：FunASR Paraformer + FSMN-VAD + CT-Punctuation
-
-文字与视觉接口均为 OpenAI-compatible，可分别切换，也可以使用同一个多模态 OpenAI 模型。更换模型不会绕过 Skill 的结构、清理和发布门禁，但不同模型的中文编辑、视觉识别和 JSON 遵循能力并不完全相同，建议先用已知视频回归。
-
-## 常用命令
+A server is optional. Install the system tools locally, then let the installer prepare the Python dependencies and Skill link:
 
 ```bash
-scripts/vtm doctor
-scripts/vtm contract
-scripts/vtm configure
-scripts/vtm configure platform 1
-scripts/vtm configure status
-scripts/vtm tasks
-scripts/vtm tasks --all
-scripts/vtm bundle --task 1 --send-target feishu
-scripts/vtm delete --task 1 --confirm
-scripts/vtm restore --task YYYYMMDD-1
-scripts/vtm cancel --latest-running
-scripts/vtm cleanup
+brew install python ffmpeg tesseract
+git clone https://github.com/isSiYua/manuloom.git
+cd manuloom
+./install.sh --agent codex --minimal --skip-system-packages
 ```
 
-Agent 自然语言映射和进度规则见 [SKILL.md](SKILL.md)。
+Full local ASR requires the extra packages and model download described in [DEPLOYMENT.md](DEPLOYMENT.md). Windows users should currently use WSL2; native Windows installation is not yet a supported path.
 
-`configure` 会显示核心服务与来源平台的确定性配置清单。公开内容优先使用无凭据模式；Cookie、API Key、Secret 和 Token 不得发送到 Agent 聊天，只能通过 SSH 交互终端运行 `scripts/vtm configure secret <配置项>` 隐藏录入。秘密保存在项目专用的 `0600` 文件中，状态命令只返回是否已配置，不返回值或前缀。
+### Configure models safely
 
-## 安全与平台规则
-
-- 不要提交 `.env`、Cookie、`SESSDATA`、API Key、任务数据库、Obsidian Vault、模型权重或下载的视频。
-- Bilibili Cookie 应使用低风险专用账号，文件权限设为 `600`，失效或泄露时立即轮换。
-- 项目不绕过付费、版权、地区或平台风险控制；只处理你有权访问和保存的内容。
-- 视频、音频和 WAV 在成功、失败或取消后自动清理；源媒体不是最终产物。
-
-## 测试
+Copy `.env.example` into your service environment, or enter secrets in a hidden terminal prompt:
 
 ```bash
-cd scripts
-python3 -m unittest discover -s tests -q
+scripts/manuloom configure secret text_llm_key
+scripts/manuloom configure secret vision_api_key   # optional
+scripts/manuloom configure status
 ```
 
-当前版本同时包含文字黄金质量回归、任务管理、Bilibili、YouTube、抖音、小红书/RedNote、知乎与普通网页来源适配、网页安全边界、动态视觉规划、多图插入、OCR 替换、1080p 定点重截和清理测试。
+Never paste API keys or Cookies into an Agent chat. The dedicated secret file is stored outside the repository with mode `0600`, and status output never prints values.
 
-## 路线图
+### Run without an Agent
 
-`1.0.0` 冻结首个公开的 Bilibili 处理核心。后续平台接入不会复制文字编辑和视觉判断逻辑，而是在同一证据管线前增加来源适配器：
+```bash
+scripts/manuloom doctor
+scripts/manuloom run --url 'https://www.bilibili.com/video/BV...' --vault ~/ObsidianVault
+```
 
-- YouTube：公共视频适配器已接入；优先读取人工/原语言自动字幕，缺失时获取单路音频进行本地 ASR，并按需取得视频帧；
-- 普通网页/CSDN：公共适配器已接入，抽取正文结构、标题、作者、表格、代码和原图，跳过音频步骤；CSDN 对某些网络出口返回 521 时会明确失败，不使用第三方代理绕过；
-- 知乎：回答和专栏文章适配器已接入；先尝试公开读取，当前出口被风险控制时明确提示通过 SSH 隐藏配置自己的 `z_c0`，不嵌入共享 Cookie；
-- 抖音：公开视频适配器已接入；公开分享页负责元数据和媒体，本地 ASR 与既有视觉管线负责后续处理，不要求官方 Client Key；
-- 小红书/RedNote：公开图文笔记适配器已接入，支持当前域名、旧域名、短链和分享文本，保留正文与原图；视频笔记、登录和风控页面明确拒绝。
+The CLI is fully usable on a local machine. Agent integrations add natural-language commands, background progress, and attachment delivery; they are not required for manuscript generation.
 
-适配器只负责取得用户有权访问的文字、时间轴和视觉证据，统一交给现有的详细文稿编辑、Obsidian 存储和任务系统。项目不会绕过登录、付费、版权、地区或风险控制。设计边界和计划见 [references/roadmap.md](references/roadmap.md)。
+## Two easy ways to use it
 
-## 来源与许可证
+### Hermes + Feishu on a server
 
-项目采用 MIT License。受 BiliNote、VideoLingo、summarize、yt-dlp、FunASR 等项目启发或使用其外部依赖；完整说明和适用许可证见 [references/third-party-notices.md](references/third-party-notices.md)。预训练模型权重和第三方服务仍受各自条款约束。
+If Hermes and its Feishu channel already work, ManuLoom installs as one linked Skill:
+
+```bash
+git clone https://github.com/isSiYua/manuloom.git
+cd manuloom
+./install.sh --agent hermes
+scripts/manuloom configure status
+```
+
+Restart the Hermes gateway, then send a supported link with `提取这个`. The Skill submits a detached job, posts six stable progress stages to Feishu, and can return a portable ZIP through `下载 N`. See the complete [Hermes + Feishu guide](docs/hermes-feishu.md).
+
+### Local browser extension
+
+Keep acquisition, ASR, model calls, and files on your own computer while submitting the active tab from Chrome, Edge, or Brave:
+
+```bash
+scripts/manuloom serve
+scripts/manuloom browser-token
+```
+
+Load `browser-extension/` as an unpacked extension, paste the local pairing token, and click **Generate Obsidian note**. The extension requests temporary `activeTab` access only after you click it. It has no `<all_urls>` permission, contains no model credential, and can connect only to the loopback bridge. See [Local browser setup](docs/browser-extension.md).
+
+## Recommended low-cost model split
+
+- Text editing: DeepSeek through an OpenAI-compatible Chat Completions endpoint.
+- Visual reading: Qwen-VL through a separate compatible endpoint.
+- ASR: local FunASR Paraformer + FSMN-VAD + CT-Punctuation.
+
+Providers and model names are configurable. Different models can change Chinese editing quality, OCR accuracy, and structured-JSON reliability, so test a known source after switching.
+
+## Quality and cost boundaries
+
+- Four text passes: plan, write, detail recovery, and final concise review.
+- A bounded terminology reconciliation pass may repair uncertain ASR spans but cannot delete surrounding context.
+- The default visual budget starts at six requests and grows with duration and transcript needs, with a hard cap of 60.
+- Local frame refinement does not increase the number of paid vision image inputs.
+- A malformed required document pass never becomes a published “best effort” note.
+- The pipeline version remains separate from the package/release version.
+
+## Project layout
+
+```text
+scripts/manuloom              friendly CLI entry point
+scripts/vtm                   compatibility CLI entry point
+scripts/vtm_core/             deterministic acquisition and publishing core
+browser-extension/            narrow-permission Chromium extension
+SKILL.md                      Agent behavior and natural-language contract
+references/                   quality, architecture, configuration, and licenses
+examples/                     copyright-safe reference outputs
+```
+
+## Contributing
+
+Bug reports, source adapters, documentation improvements, and reproducible quality cases are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
+
+Core editorial changes require evidence that they improve general quality without degrading accepted manuscripts. Platform adapters should acquire evidence only; they must not fork the manuscript-writing pipeline.
+
+## Privacy, copyright, and security
+
+- API keys, Cookies, Vault content, task databases, model weights, source media, and generated private notes are ignored and must never be committed.
+- Use only content you are authorized to access, download, and transform.
+- Public-source adapters do not attempt to circumvent access controls.
+- See [SECURITY.md](SECURITY.md) for private-reporting guidance.
+- Third-party dependencies and adapted algorithms are documented in [third-party-notices.md](references/third-party-notices.md).
+
+## License
+
+ManuLoom is released under the [MIT License](LICENSE). Third-party libraries, model weights, web content, and provider services remain subject to their own licenses and terms.
